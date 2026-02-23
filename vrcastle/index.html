@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>VR Room Viewer -  Castle</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        body { margin:0; overflow:hidden; background:#000; font-family:sans-serif; }
+        #enterVR {
+            position:fixed;
+            top:50%;
+            left:50%;
+            transform:translate(-50%,-50%);
+            padding:20px 30px;
+            font-size:20px;
+            border:none;
+            border-radius:12px;
+            background:#e60012; /* Mario Red */
+            color:white;
+            z-index:10;
+            cursor:pointer;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+        }
+    </style>
+</head>
+<body>
+
+<button id="enterVR">Enter the Castle</button>
+
+<script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.160/build/three.module.js",
+      "three/examples/jsm/": "https://cdn.jsdelivr.net/npm/three@0.160/examples/jsm/"
+    }
+  }
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { VRButton } from 'three/examples/jsm/webxr/VRButton.js';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+
+let scene, camera, renderer, cameraRig;
+let roomModel;
+
+init();
+animate();
+
+function init() {
+    scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x87CEEB); // Sky blue background
+
+    camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+    
+    // --- CAMERA RIG ---
+    cameraRig = new THREE.Group();
+    // 1.6 meters is eye-level for a standing adult
+    cameraRig.position.set(-1, 1.6, 0); 
+    cameraRig.add(camera);
+    scene.add(cameraRig);
+
+    renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setPixelRatio(window.devicePixelRatio);
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.xr.enabled = true;
+    renderer.shadowMap.enabled = true;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.2;
+    document.body.appendChild(renderer.domElement);
+
+    // Lighting (Brighter for the interior)
+    const ambient = new THREE.AmbientLight(0xffffff, 1.5);
+    scene.add(ambient);
+
+    const sunLight = new THREE.DirectionalLight(0xffffff, 1.0);
+    sunLight.position.set(5, 15, 5);
+    scene.add(sunLight);
+
+    loadRoom();
+
+    window.addEventListener("resize", onResize);
+}
+
+function loadRoom() {
+    const loader = new GLTFLoader();
+    loader.load(
+        "castle.glb",
+        (gltf) => {
+            roomModel = gltf.scene;
+
+            roomModel.traverse((child) => {
+                if (child.isMesh) {
+                    child.castShadow = true;
+                    child.receiveShadow = true;
+                    if (child.material) child.material.side = THREE.DoubleSide;
+                }
+            });
+
+            // MANUAL POSITIONING TO ALIGN LOBBY SUN RUG
+            // We move the model so the interior lobby is at 0,0.
+            // Adjust these values if you are slightly off-center:
+            roomModel.position.set(0, 3, 0); // Shifting the model forward so you "spawn" inside
+            
+            scene.add(roomModel);
+
+            const vrButton = VRButton.createButton(renderer);
+            vrButton.style.display = 'none'; 
+            document.body.appendChild(vrButton);
+
+            const enterVRBtn = document.getElementById("enterVR");
+            enterVRBtn.onclick = () => {
+                vrButton.click();
+                enterVRBtn.style.display = "none";
+            };
+        }
+    );
+}
+
+function animate() {
+    renderer.setAnimationLoop(() => {
+        renderer.render(scene, camera);
+    });
+}
+
+function onResize() {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+}
+</script>
+
+</body>
+</html>

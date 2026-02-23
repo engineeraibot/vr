@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>WebGazer Eye Tracking</title>
+<style>
+  html, body {
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+    background: black;
+    cursor: crosshair;
+  }
+  canvas {
+    position: absolute;
+    top: 0;
+    left: 0;
+  }
+  #info {
+    position: fixed;
+    bottom: 10px;
+    left: 50%;
+    transform: translateX(-50%);
+    color: #0f0;
+    font-family: monospace;
+    opacity: 0.7;
+  }
+</style>
+</head>
+<body>
+
+<canvas id="canvas"></canvas>
+<div id="info">Click around the screen to calibrate your gaze</div>
+
+<!-- WebGazer -->
+<script src="https://webgazer.cs.brown.edu/webgazer.js"></script>
+
+<script>
+const canvas = document.getElementById("canvas");
+const ctx = canvas.getContext("2d");
+
+function resize() {
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+}
+window.addEventListener("resize", resize);
+resize();
+
+// Smoothed gaze
+let gazeX = canvas.width / 2;
+let gazeY = canvas.height / 2;
+
+// Start WebGazer
+webgazer
+  .setGazeListener((data) => {
+    if (!data) return;
+
+    gazeX += (data.x - gazeX) * 0.2;
+    gazeY += (data.y - gazeY) * 0.2;
+  })
+  .showVideo(false)
+  .showFaceOverlay(false)
+  .showFaceFeedbackBox(false)
+  .begin();
+
+// Calibration on click
+let clickCount = 0;
+document.addEventListener("click", (e) => {
+  clickCount++;
+  webgazer.recordScreenPosition(e.clientX, e.clientY, "click");
+  document.getElementById("info").textContent =
+    clickCount < 50
+      ? `Calibrating… (${clickCount}/50)`
+      : "Calibration done — look around 👀";
+});
+
+// Draw loop
+function draw() {
+  requestAnimationFrame(draw);
+
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  // Gaze circle
+  ctx.beginPath();
+  ctx.arc(gazeX, gazeY, 18, 0, Math.PI * 2);
+  ctx.fillStyle = "#00ff88";
+  ctx.fill();
+}
+draw();
+</script>
+
+</body>
+</html>

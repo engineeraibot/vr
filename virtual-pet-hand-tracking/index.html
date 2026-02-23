@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>2D Cartoon Dog Virtual Pet</title>
+<style>
+  body { margin: 0; overflow: hidden; background: #111; }
+  video { display: none; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<video id="video" autoplay playsinline></video>
+<canvas id="canvas"></canvas>
+
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+
+<script>
+const canvas = document.getElementById("canvas");
+const ctx = canvas.getContext("2d");
+canvas.width = window.innerWidth;
+canvas.height = window.innerHeight;
+
+const video = document.getElementById("video");
+navigator.mediaDevices.getUserMedia({ video: true }).then(stream => video.srcObject = stream);
+
+// ---------------- BALL ----------------
+const ball = { x: canvas.width/2 + 100, y: canvas.height/2 - 100, r: 20, vx: 0, vy: 0 };
+let holdingBall = false;
+
+// ---------------- DOG ----------------
+const dog = {
+  x: canvas.width/2,
+  y: canvas.height/2,
+  size: 60,
+  happy: 0,
+  legPhase: 0,
+  tailPhase: 0
+};
+
+// ---------------- HANDS ----------------
+let handsLandmarks = [];
+
+// ---------------- MEDIAPIPE HANDS ----------------
+const hands = new Hands({ locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}` });
+hands.setOptions({
+  maxNumHands: 2,
+  modelComplexity: 1,
+  minDetectionConfidence: 0.6,
+  minTrackingConfidence: 0.6
+});
+hands.onResults(results => { handsLandmarks = results.multiHandLandmarks || []; });
+
+const cam = new Camera(video, {
+  onFrame: async () => { await hands.send({ image: video }); },
+  width: 640, height: 480
+});
+cam.start();
+
+// ---------------- UTILS ----------------
+function distance(x1,y1,x2,y2){ return Math.hypot(x1-x2, y1-y2); }
+
+// ---------------- DRAW DOG ----------------
+function drawDog(){
+  const {x,y,size,legPhase,tailPhase,happy} = dog;
+  ctx.save();
+  ctx.translate(x,y);
+
+  // ---------------- BODY ----------------
+  ctx.fillStyle = `rgb(${255},${170+happy*85},${85})`;
+  ctx.beginPath();
+  ctx.ellipse(0,0,size*1.2,size*0.7,0,0,Math.PI*2);
+  ctx.fill();
+
+  // ---------------- LEGS ----------------
+  const legLength = size*0.5;
+  const legWidth = size*0.12;
+  const legOffsetX = size*0.5;
+  const legOffsetY = size*0.3;
+  const legSwing = Math.sin(legPhase)*0.5;
+
+  ctx.strokeStyle="#333";
+  ctx.lineWidth=legWidth;
+
+  // Front legs
+  ctx.beginPath();
+  ctx.moveTo(-legOffsetX*0.6, legOffsetY*0.5);
+  ctx.lineTo(-legOffsetX*0.6 + legSwing*20, legOffsetY + legLength);
+  ctx.stroke();
+
+  ctx.beginPath();
+  ctx.moveTo(legOffsetX*0.6, legOffsetY*0.5);
+  ctx.lineTo(legOffsetX*0.6 - legSwing*20, legOffsetY + legLength);
+  ctx.stroke();
+
+  // Back legs
+  ctx.beginPath();
+  ctx.moveTo(-legOffsetX*0.6, -legOffsetY*0.5);
+  ctx.lineTo(-legOffsetX*0.6 + legSwing*20, -legOffsetY - legLength);
+  ctx.stroke();
+
+  ctx.beginPath();
+  ctx.moveTo(legOffsetX*0.6, -legOffsetY*0.5);
+  ctx.lineTo(legOffsetX*0.6 - legSwing*20, -legOffsetY - legLength);
+  ctx.stroke();
+
+  // ---------------- TAIL ----------------
+  ctx.strokeStyle="#333";
+  ctx.lineWidth=8;
+  ctx.beginPath();
+  ctx.moveTo(-size*0.8,0);
+  ctx.quadraticCurveTo(-size-10 + Math.sin(tailPhase)*20, -size*0.2, -size*0.8, -size*0.4);
+  ctx.stroke();
+
+  // ---------------- HEAD ----------------
+  ctx.save();
+  ctx.translate(size*1.1, -size*0.2);
+  ctx.rotate(Math.sin(legPhase)*0.05);
+  // Head ellipse
+  ctx.fillStyle = `rgb(${255},${170+happy*85},${85})`;
+  ctx.beginPath();
+  ctx.ellipse(0,0,size*0.5,size*0.45,0,0,Math.PI*2);
+  ctx.fill();
+  // Ears
+  ctx.fillStyle="#333";
+  ctx.beginPath();
+  ctx.ellipse(-size*0.25,-size*0.25,size*0.12,size*0.18,0,0,Math.PI*2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.ellipse(size*0.25,-size*0.25,size*0.12,size*0.18,0,0,Math.PI*2);
+  ctx.fill();
+  // Eye
+  ctx.fillStyle="#000";
+  ctx.beginPath();
+  ctx.arc(-size*0.1,-size*0.05,6,0,Math.PI*2);
+  ctx.fill();
+  // Nose
+  ctx.beginPath();
+  ctx.arc(size*0.2,0,6,0,Math.PI*2);
+  ctx.fill();
+  ctx.restore();
+
+  ctx.restore();
+}
+
+// ---------------- ANIMATE ----------------
+function animate(){
+  requestAnimationFrame(animate);
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+
+  // ---------------- HANDS ----------------
+  for(const hand of handsLandmarks){
+    const thumb = hand[4], index = hand[8];
+    const xThumb = (1-thumb.x)*canvas.width;
+    const yThumb = thumb.y*canvas.height;
+    const xIndex = (1-index.x)*canvas.width;
+    const yIndex = index.y*canvas.height;
+
+    // Draw landmarks
+    ctx.fillStyle="lime";
+    for(const lm of hand){
+      ctx.beginPath();
+      ctx.arc((1-lm.x)*canvas.width, lm.y*canvas.height, 8,0,Math.PI*2);
+      ctx.fill();
+    }
+
+    const midX = (xThumb+xIndex)/2;
+    const midY = (yThumb+yIndex)/2;
+    const pinchDist = distance(xThumb,yThumb,xIndex,yIndex);
+    const isPinching = pinchDist < 70;
+
+    // Grab/release
+    if(isPinching){
+      if(!holdingBall && distance(ball.x,ball.y,midX,midY)<ball.r+30){
+        holdingBall = true;
+      }
+    } else {
+      if(holdingBall){ ball.vx = (midX-ball.x)*0.3; ball.vy=(midY-ball.y)*0.3; }
+      holdingBall=false;
+    }
+
+    if(holdingBall){ ball.x=midX; ball.y=midY; ball.vx=0; ball.vy=0; }
+
+    // Petting dog
+    if(pinchDist>=70 && distance(midX,midY,dog.x,dog.y)<dog.size+30){
+      dog.happy = Math.min(dog.happy+0.05,1);
+    }
+  }
+
+  // ---------------- BALL PHYSICS ----------------
+  if(!holdingBall){
+    ball.vy += 0.3; ball.x += ball.vx; ball.y += ball.vy;
+    ball.vx*=0.98; ball.vy*=0.98;
+    if(ball.y>canvas.height-ball.r){ ball.y=canvas.height-ball.r; ball.vy*=-0.7; }
+    if(ball.x<ball.r||ball.x>canvas.width-ball.r){ ball.vx*=-0.7; }
+  }
+
+  // ---------------- DOG MOVEMENT ----------------
+  const dx = ball.x - dog.x;
+  const dy = ball.y - dog.y;
+  const dist = Math.hypot(dx,dy);
+  if(dist>5){
+    const speed = 2 + dog.happy;
+    dog.x += dx/dist * speed;
+    dog.y += dy/dist * speed;
+    dog.legPhase += 0.25;
+    dog.tailPhase += 0.2;
+  }
+
+  // ---------------- DRAW BALL ----------------
+  ctx.fillStyle="cyan";
+  ctx.beginPath();
+  ctx.arc(ball.x,ball.y,ball.r,0,Math.PI*2);
+  ctx.fill();
+
+  // ---------------- DRAW DOG ----------------
+  drawDog();
+  dog.happy *= 0.95;
+}
+
+animate();
+
+// ---------------- RESIZE ----------------
+window.addEventListener("resize",()=>{
+  canvas.width=window.innerWidth;
+  canvas.height=window.innerHeight;
+});
+</script>
+</body>
+</html>

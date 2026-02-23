@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Head & Hand Balloon Game</title>
+<style>
+  body {
+    margin: 0;
+    overflow: hidden;
+    background: black;
+  }
+  video {
+    display: none;
+  }
+  canvas {
+    position: absolute;
+    top: 0;
+    left: 0;
+  }
+</style>
+</head>
+<body>
+
+<video id="video" autoplay playsinline></video>
+<canvas id="canvas"></canvas>
+
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+
+<script>
+const video = document.getElementById("video");
+const canvas = document.getElementById("canvas");
+const ctx = canvas.getContext("2d");
+
+canvas.width = window.innerWidth;
+canvas.height = window.innerHeight;
+
+// ------------------------------
+// Balloon
+// ------------------------------
+const ball = { x: canvas.width / 2, y: -50, r: 28, vx: 1, vy: 0.5 };
+function resetBall() {
+  ball.x = Math.random() * canvas.width;
+  ball.y = -ball.r;
+  ball.vx = (Math.random() - 0.5) * 2;
+  ball.vy = 0.5;
+}
+
+// ------------------------------
+// Explosion particles
+// ------------------------------
+let particles = [];
+function explode(x, y) {
+  for (let i = 0; i < 20; i++) {
+    particles.push({
+      x, y,
+      vx: (Math.random() - 0.5) * 6,
+      vy: (Math.random() - 0.5) * 6,
+      life: 30
+    });
+  }
+}
+
+// ------------------------------
+// Face
+// ------------------------------
+let face = { x: canvas.width/2, y: canvas.height/2, size: 80 };
+
+// ------------------------------
+// Hands
+// ------------------------------
+let handsLandmarks = [];
+
+// ------------------------------
+// Camera
+// ------------------------------
+navigator.mediaDevices.getUserMedia({ video: true })
+  .then(stream => video.srcObject = stream);
+
+// ------------------------------
+// FaceMesh
+// ------------------------------
+const faceMesh = new FaceMesh({
+  locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${f}`
+});
+faceMesh.setOptions({
+  maxNumFaces:1,
+  refineLandmarks:true,
+  minDetectionConfidence:0.5,
+  minTrackingConfidence:0.5
+});
+faceMesh.onResults(results => {
+  if (!results.multiFaceLandmarks.length) return;
+  const lm = results.multiFaceLandmarks[0];
+  const nose = lm[1];
+  const leftEye = lm[33];
+  const rightEye = lm[263];
+
+  // Mirror fix
+  face.x = (1 - nose.x) * canvas.width;
+  face.y = nose.y * canvas.height;
+
+  const eyeDist = Math.abs(leftEye.x - rightEye.x) * canvas.width;
+  face.size = eyeDist * 1.6;
+});
+
+// ------------------------------
+// Hands
+// ------------------------------
+const hands = new Hands({ locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}` });
+hands.setOptions({
+  maxNumHands: 2,
+  modelComplexity: 1,
+  minDetectionConfidence: 0.6,
+  minTrackingConfidence: 0.6
+});
+hands.onResults(results => {
+  handsLandmarks = results.multiHandLandmarks || [];
+});
+
+// ------------------------------
+// MediaPipe camera
+// ------------------------------
+const cam = new Camera(video, {
+  onFrame: async()=>{ 
+    await faceMesh.send({ image: video }); 
+    await hands.send({ image: video }); 
+  },
+  width: 640,
+  height: 480
+});
+cam.start();
+
+// ------------------------------
+// Check hand-ball collisions
+// ------------------------------
+function checkHandHit() {
+  for (const hand of handsLandmarks) {
+    for (const lm of hand) {
+      const x = (1 - lm.x) * canvas.width;
+      const y = lm.y * canvas.height;
+      const dx = ball.x - x;
+      const dy = ball.y - y;
+      if (Math.sqrt(dx*dx + dy*dy) < ball.r + 10) {
+        explode(ball.x, ball.y);
+        resetBall();
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+// ------------------------------
+// Check head-ball collision (bounces)
+function checkHeadHit() {
+  const dx = ball.x - face.x;
+  const dy = ball.y - face.y;
+  const dist = Math.sqrt(dx*dx + dy*dy);
+  const minDist = ball.r + face.size * 0.5;
+  if (dist < minDist) {
+    // Reflect ball off head
+    const angle = Math.atan2(dy, dx);
+    const overlap = minDist - dist;
+    ball.x += Math.cos(angle) * overlap;
+    ball.y += Math.sin(angle) * overlap;
+
+    // Simple bounce velocity
+    const speed = Math.sqrt(ball.vx*ball.vx + ball.vy*ball.vy) || 2;
+    ball.vx = Math.cos(angle) * speed;
+    ball.vy = Math.sin(angle) * speed;
+  }
+}
+
+// ------------------------------
+// Draw face
+// ------------------------------
+function drawFace() {
+  ctx.fillStyle = "#FFD1A4";
+  ctx.beginPath();
+  ctx.arc(face.x, face.y, face.size * 0.5, 0, Math.PI*2);
+  ctx.fill();
+
+  const eyeX = face.size*0.18;
+  const eyeY = face.size*0.1;
+  const eyeR = face.size*0.06;
+  ctx.fillStyle="#000";
+  ctx.beginPath();
+  ctx.arc(face.x - eyeX, face.y - eyeY, eyeR,0,Math.PI*2);
+  ctx.arc(face.x + eyeX, face.y - eyeY, eyeR,0,Math.PI*2);
+  ctx.fill();
+
+  ctx.strokeStyle="#000";
+  ctx.lineWidth=3;
+  ctx.beginPath();
+  ctx.arc(face.x, face.y + face.size*0.12, face.size*0.15, 0, Math.PI);
+  ctx.stroke();
+}
+
+// ------------------------------
+// Draw hands
+// ------------------------------
+function drawHands() {
+  ctx.fillStyle = "lime";
+  for (const hand of handsLandmarks) {
+    for (const lm of hand) {
+      const x = (1 - lm.x) * canvas.width;
+      const y = lm.y * canvas.height;
+      ctx.beginPath();
+      ctx.arc(x, y, 6,0,Math.PI*2);
+      ctx.fill();
+    }
+  }
+}
+
+// ------------------------------
+// Animate
+// ------------------------------
+function animate() {
+  requestAnimationFrame(animate);
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+
+  // Balloon physics
+  ball.y += ball.vy;
+  ball.x += ball.vx;
+  ball.vy += 0.03;
+  ball.vx *= 0.995;
+  if(ball.x < ball.r || ball.x > canvas.width-ball.r) ball.vx*=-1;
+  if(ball.y > canvas.height + ball.r) resetBall();
+
+  // Collisions
+  if(!checkHandHit()) {
+    checkHeadHit(); // Only bounce if not hit by hands
+  }
+
+  // Draw balloon
+  ctx.fillStyle="red";
+  ctx.beginPath();
+  ctx.arc(ball.x, ball.y, ball.r, 0, Math.PI*2);
+  ctx.fill();
+
+  // Particles
+  for(let i=particles.length-1;i>=0;i--){
+    const p=particles[i];
+    p.x+=p.vx;
+    p.y+=p.vy;
+    p.life--;
+    ctx.fillStyle="orange";
+    ctx.beginPath();
+    ctx.arc(p.x,p.y,4,0,Math.PI*2);
+    ctx.fill();
+    if(p.life<=0) particles.splice(i,1);
+  }
+
+  drawFace();
+  drawHands();
+}
+
+animate();
+
+// ------------------------------
+window.addEventListener("resize",()=>{
+  canvas.width=window.innerWidth;
+  canvas.height=window.innerHeight;
+});
+</script>
+
+</body>
+</html>

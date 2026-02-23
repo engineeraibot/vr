@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>VR Room</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        body { margin:0; overflow:hidden; background:#000; font-family:sans-serif; }
+        #enterVR {
+            position:fixed;
+            top:50%;
+            left:50%;
+            transform:translate(-50%,-50%);
+            padding:20px 30px;
+            font-size:20px;
+            border:none;
+            border-radius:12px;
+            background:#00aaff;
+            color:white;
+            z-index:10;
+            cursor:pointer;
+        }
+    </style>
+</head>
+<body>
+
+<button id="enterVR">Tap to Enter VR</button>
+
+<script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.160/build/three.module.js",
+      "three/examples/jsm/": "https://cdn.jsdelivr.net/npm/three@0.160/examples/jsm/"
+    }
+  }
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { VRButton } from 'three/examples/jsm/webxr/VRButton.js';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+
+let scene, camera, renderer, cameraRig;
+let roomModel;
+
+init();
+animate();
+
+function init() {
+    scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x111111);
+
+    camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+    
+    // --- CAMERA RIG ---
+    cameraRig = new THREE.Group();
+    // Centered horizontally (0, 0) and set to 1.2m height
+    cameraRig.position.set(0, 1.2, 0); 
+    cameraRig.add(camera);
+    scene.add(cameraRig);
+
+    renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setPixelRatio(window.devicePixelRatio);
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.xr.enabled = true;
+    renderer.shadowMap.enabled = true;
+    // Essential for realistic GLB colors
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1;
+    document.body.appendChild(renderer.domElement);
+
+    // Lighting
+    const ambient = new THREE.AmbientLight(0xffffff, 2.0);
+    scene.add(ambient);
+
+    const dir = new THREE.DirectionalLight(0xffffff, 1.5);
+    dir.position.set(5, 10, 7);
+    scene.add(dir);
+
+    loadRoom();
+
+    window.addEventListener("resize", onResize);
+}
+
+function loadRoom() {
+    const loader = new GLTFLoader();
+    loader.load(
+        "2_20_2026.glb",
+        (gltf) => {
+            roomModel = gltf.scene;
+
+            roomModel.traverse((child) => {
+                if (child.isMesh) {
+                    child.castShadow = true;
+                    child.receiveShadow = true;
+                    if (child.material) child.material.side = THREE.DoubleSide;
+                }
+            });
+
+            // Calculate the size of the model to center it perfectly
+            const box = new THREE.Box3().setFromObject(roomModel);
+            const center = box.getCenter(new THREE.Vector3());
+            
+            // This centers the room around the 0,0,0 point
+            roomModel.position.x = -center.x;
+            roomModel.position.z = -center.z;
+            roomModel.position.y = -box.min.y; // Ensure floor is at 0
+
+            scene.add(roomModel);
+
+            const vrButton = VRButton.createButton(renderer);
+            vrButton.style.display = 'none'; 
+            document.body.appendChild(vrButton);
+
+            const enterVRBtn = document.getElementById("enterVR");
+            enterVRBtn.onclick = () => {
+                vrButton.click();
+                enterVRBtn.style.display = "none";
+            };
+        }
+    );
+}
+
+function animate() {
+    renderer.setAnimationLoop(() => {
+        renderer.render(scene, camera);
+    });
+}
+
+function onResize() {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+}
+</script>
+
+</body>
+</html>

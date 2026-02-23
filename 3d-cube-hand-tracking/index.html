@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Hand-Controlled 3D Telekinesis Room</title>
+
+<!-- ================= IMPORT MAP ================= -->
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+
+<style>
+  body { margin: 0; overflow: hidden; background: #000; }
+  video { display: none; }
+</style>
+</head>
+<body>
+
+<video id="video" autoplay playsinline></video>
+
+<!-- ================= MEDIAPIPE (GLOBAL SCRIPTS) ================= -->
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+
+<!-- ================= MAIN MODULE ================= -->
+<script type="module">
+/* =====================================================
+   THREE IMPORTS
+===================================================== */
+import * as THREE from "three";
+import { EffectComposer } from "three/addons/postprocessing/EffectComposer.js";
+import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
+import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js";
+
+/* =====================================================
+   THREE SETUP
+===================================================== */
+const scene = new THREE.Scene();
+
+const camera = new THREE.PerspectiveCamera(75, innerWidth / innerHeight, 0.1, 100);
+camera.position.set(0, 1.5, 6);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(innerWidth, innerHeight);
+document.body.appendChild(renderer.domElement);
+
+/* =====================================================
+   BLOOM
+===================================================== */
+const composer = new EffectComposer(renderer);
+composer.addPass(new RenderPass(scene, camera));
+
+const bloom = new UnrealBloomPass(
+  new THREE.Vector2(innerWidth, innerHeight),
+  1.2,
+  0.4,
+  0.85
+);
+composer.addPass(bloom);
+
+/* =====================================================
+   LIGHTING
+===================================================== */
+scene.add(new THREE.AmbientLight(0xffffff, 0.4));
+const light = new THREE.DirectionalLight(0xffffff, 1);
+light.position.set(5, 10, 5);
+scene.add(light);
+
+/* =====================================================
+   ROOM
+===================================================== */
+const ROOM = 8;
+const bounds = ROOM / 2 - 0.4;
+
+const floor = new THREE.GridHelper(ROOM, 20, 0x3333ff, 0x111133);
+scene.add(floor);
+
+const back = floor.clone();
+back.rotation.x = Math.PI / 2;
+back.position.set(0, ROOM/2, -ROOM/2);
+scene.add(back);
+
+const left = back.clone();
+left.rotation.z = Math.PI / 2;
+left.position.set(-ROOM/2, ROOM/2, 0);
+scene.add(left);
+
+const right = back.clone();
+right.rotation.z = Math.PI / 2;
+right.position.set(ROOM/2, ROOM/2, 0);
+scene.add(right);
+
+/* =====================================================
+   CUBE
+===================================================== */
+const cube = new THREE.Mesh(
+  new THREE.BoxGeometry(0.6, 0.6, 0.6),
+  new THREE.MeshStandardMaterial({
+    color: 0x00ffff,
+    emissive: 0x006666,
+    emissiveIntensity: 0.8
+  })
+);
+cube.position.set(0, 1, 0);
+scene.add(cube);
+
+/* =====================================================
+   HAND GHOST
+===================================================== */
+const handGhost = new THREE.Mesh(
+  new THREE.SphereGeometry(0.08, 16, 16),
+  new THREE.MeshBasicMaterial({ color: 0xff00ff })
+);
+scene.add(handGhost);
+
+/* =====================================================
+   MOTION TRAIL
+===================================================== */
+const trailPoints = [];
+const trailGeom = new THREE.BufferGeometry();
+const trail = new THREE.Line(
+  trailGeom,
+  new THREE.LineBasicMaterial({ color: 0x00ffff })
+);
+scene.add(trail);
+
+/* =====================================================
+   PHYSICS
+===================================================== */
+const velocity = new THREE.Vector3();
+const damping = 0.92;
+
+/* =====================================================
+   MEDIAPIPE HANDS (GLOBAL API)
+===================================================== */
+const video = document.getElementById("video");
+navigator.mediaDevices.getUserMedia({ video: true })
+  .then(s => video.srcObject = s);
+
+let handsLandmarks = [];
+
+const hands = new window.Hands({
+  locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`
+});
+
+hands.setOptions({
+  maxNumHands: 2,
+  modelComplexity: 1,
+  minDetectionConfidence: 0.7,
+  minTrackingConfidence: 0.7
+});
+
+hands.onResults(r => handsLandmarks = r.multiHandLandmarks || []);
+
+new window.Camera(video, {
+  onFrame: async () => hands.send({ image: video }),
+  width: 640,
+  height: 480
+}).start();
+
+/* =====================================================
+   ANIMATION LOOP
+===================================================== */
+let lastTarget = new THREE.Vector3();
+
+function animate() {
+  requestAnimationFrame(animate);
+
+  if (handsLandmarks.length) {
+    const p = handsLandmarks[0][8];
+    const tx = (0.5 - p.x) * 6;
+    const ty = (0.5 - p.y) * 4;
+
+    handGhost.position.set(tx, ty, 0);
+
+    const target = new THREE.Vector3(tx, ty, 0);
+    velocity.add(target.clone().sub(lastTarget).multiplyScalar(0.6));
+    lastTarget.copy(target);
+
+    // TWO-HAND SCALE
+    if (handsLandmarks.length === 2) {
+      const a = handsLandmarks[0][8];
+      const b = handsLandmarks[1][8];
+      const d = Math.hypot(a.x - b.x, a.y - b.y);
+      const s = THREE.MathUtils.clamp(d * 5, 0.3, 2.5);
+      cube.scale.lerp(new THREE.Vector3(s, s, s), 0.15);
+    }
+  }
+
+  cube.position.add(velocity);
+  velocity.multiplyScalar(damping);
+
+  ["x","y","z"].forEach(axis => {
+    if (cube.position[axis] > bounds || cube.position[axis] < -bounds) {
+      cube.position[axis] = THREE.MathUtils.clamp(cube.position[axis], -bounds, bounds);
+      velocity[axis] *= -0.7;
+    }
+  });
+
+  trailPoints.push(cube.position.clone());
+  if (trailPoints.length > 25) trailPoints.shift();
+  trailGeom.setFromPoints(trailPoints);
+
+  composer.render();
+}
+
+animate();
+
+/* =====================================================
+   RESIZE
+===================================================== */
+addEventListener("resize", () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+  composer.setSize(innerWidth, innerHeight);
+});
+</script>
+</body>
+</html>
