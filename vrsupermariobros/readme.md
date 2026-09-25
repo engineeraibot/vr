@@ -17,6 +17,10 @@ sending motion-sensor data to the page during a WebXR session, which would break
 The optional **WebXR mode** button still exists on phones, but there only taps / holds move Mario.
 On standalone headsets (Quest) Enter VR uses WebXR.
 
+The phone view uses the Cardboard lens model. If the picture looks off, change **Headset lenses** on the
+title screen (Cardboard v2 fits most headsets). The phone's physical screen size is estimated at
+150 CSS px per inch; if the two images don't line up with your lenses, add `?dpi=140` (or 160) to the URL.
+
 ## Controls
 
 Phone VR headset (body controls):
