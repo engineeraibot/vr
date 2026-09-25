@@ -149,9 +149,9 @@ class Game {
             });
         }
         $('play').onclick = () => this.playFlat();
-        const lens = $('lens');
-        lens.value = this.stereo.lens ? 'on' : 'off';
-        lens.onchange = () => this.stereo.setLens(lens.value === 'on');
+        const viewer = $('viewer');
+        viewer.value = this.stereo.viewerId;
+        viewer.onchange = () => this.stereo.setViewer(viewer.value);
         document.addEventListener('fullscreenchange', () => {
             if (!document.fullscreenElement && this.stereo.active) this.exitPhoneVR();
         });
@@ -254,6 +254,7 @@ class Game {
         // Both need the click's user activation, so start them before any await.
         this.sound.unlock();
         this.enableSensors();
+        this.motion.startSensorApi();
         const session = await navigator.xr.requestSession('immersive-vr', {
             optionalFeatures: ['local-floor', 'bounded-floor', 'hand-tracking'],
         });

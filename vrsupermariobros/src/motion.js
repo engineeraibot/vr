@@ -65,6 +65,7 @@ export class BodyMotion {
         const now = performance.now() / 1000;
         const dt = Math.min(Math.max(this.lastSample ? now - this.lastSample : 0.016, 0.001), 0.1);
         this.lastSample = now;
+        this.lastDeviceMotion = now;
         const mag = Math.hypot(ai.x, ai.y, ai.z);
         const la = e.acceleration;
         let vert;
@@ -100,6 +101,34 @@ export class BodyMotion {
         if (this.armed && this.av > 1.3 / s && now - this.lastStep > 0.24 && now - this.lastJump > 0.45) {
             this.armed = false;
             this.fireStep(now);
+        }
+    }
+
+    // Second way to read the accelerometer (Generic Sensor API), tried for WebXR sessions,
+    // where 'devicemotion' events stop. Ignored while 'devicemotion' is still arriving.
+    startSensorApi() {
+        if (this.sensorApi || typeof LinearAccelerationSensor === 'undefined' || typeof GravitySensor === 'undefined') return;
+        try {
+            const la = new LinearAccelerationSensor({ frequency: 60 });
+            const gr = new GravitySensor({ frequency: 60 });
+            let last = 0;
+            la.addEventListener('reading', () => {
+                const now = performance.now() / 1000;
+                if (now - (this.lastDeviceMotion || -9) < 0.5 || gr.x === null || gr.x === undefined) return;
+                const dt = Math.min(Math.max(last ? now - last : 0.016, 0.001), 0.1);
+                last = now;
+                const gl = Math.hypot(gr.x, gr.y, gr.z) || 1;
+                const vert = (la.x * gr.x + la.y * gr.y + la.z * gr.z) / gl;
+                const mag = Math.hypot(la.x + gr.x, la.y + gr.y, la.z + gr.z);
+                this.hasSensor = true;
+                this.lastSample = now;
+                this.feed(vert, mag, now, dt);
+            });
+            la.start();
+            gr.start();
+            this.sensorApi = { la, gr };
+        } catch {
+            // Not available or not allowed in this browser.
         }
     }
 
