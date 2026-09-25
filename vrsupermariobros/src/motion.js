@@ -37,25 +37,26 @@ export class BodyMotion {
         safeSet(LS_KEY, String(v));
     }
 
-    // Must be called from a user gesture on iOS (permission prompt). Harmless elsewhere.
+    // Browsers with DeviceMotionEvent.requestPermission (iOS, newer Chrome) only grant it
+    // from a tap or click, so this is called again on every tap until it succeeds.
     async enable() {
         if (typeof DeviceMotionEvent === 'undefined') return false;
-        if (typeof DeviceMotionEvent.requestPermission === 'function') {
-            try {
-                if (await DeviceMotionEvent.requestPermission() !== 'granted') return false;
-            } catch {
-                return false;
-            }
-        }
         if (!this.listening) {
             window.addEventListener('devicemotion', this._onMotion);
             this.listening = true;
         }
-        return true;
+        if (this.granted || typeof DeviceMotionEvent.requestPermission !== 'function') return true;
+        try {
+            this.granted = await DeviceMotionEvent.requestPermission() === 'granted';
+        } catch {
+            this.granted = false;
+        }
+        return this.granted;
     }
 
     get needsPermission() {
-        return typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function' && !this.listening;
+        return typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function'
+            && !this.granted && !this.hasSensor;
     }
 
     onMotion(e) {
@@ -102,9 +103,9 @@ export class BodyMotion {
         }
     }
 
-    // Head height (metres) from the XR viewer pose, used only without an accelerometer.
+    // Head height (metres) from the XR viewer pose, used while the accelerometer is silent.
     feedHead(y, now, dt) {
-        if (this.hasSensor || dt <= 0) return;
+        if ((this.hasSensor && now - this.lastSample < 1) || dt <= 0) return;
         const h = this.head || (this.head = { s: y, base: y, prev: y, armed: false });
         h.s += (y - h.s) * (1 - Math.exp(-dt / 0.04));
         const vy = (h.s - h.prev) / dt;

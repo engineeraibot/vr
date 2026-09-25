@@ -1,4 +1,4 @@
-// Super Mario Bros 3D — first-person World 1-1 for WebXR (phone VR / headsets) and desktop.
+// Super Mario Bros 3D — first-person World 1-1 for phone VR headsets, WebXR headsets and desktop.
 import * as THREE from 'three';
 import { initTextures } from './textures.js';
 import { initModels, MAT } from './models.js';
@@ -9,6 +9,7 @@ import { Level, ENEMIES, START, CHECKPOINT, POLE_X, POLE_TOP, CASTLE_X, DEATH_Y 
 import { Player } from './player.js';
 import { Goomba, Koopa, Item, Fireball, CoinPop, Fx } from './entities.js';
 import { Hud } from './hud.js';
+import { PhoneHead, StereoView } from './cardboard.js';
 import { boxesTouch } from './physics.js';
 
 const SKY = 0x5c94fc;
@@ -28,6 +29,8 @@ class Game {
         initTextures();
         initModels();
         this.isTouch = matchMedia('(pointer: coarse)').matches;
+        // Phones use our own stereo view (see cardboard.js); headsets like Quest use WebXR.
+        this.isPhone = this.isTouch && !/OculusBrowser|Quest|Pico|Wolvic/i.test(navigator.userAgent);
 
         const r = this.renderer = new THREE.WebGLRenderer({ antialias: true });
         r.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -37,6 +40,8 @@ class Game {
         r.shadowMap.type = THREE.PCFShadowMap;
         document.body.appendChild(r.domElement);
         this.clock = new THREE.Clock();
+        this.phoneHead = new PhoneHead();
+        this.stereo = new StereoView(r);
 
         this.scene = new THREE.Scene();
         this.scene.background = new THREE.Color(SKY);
@@ -119,21 +124,37 @@ class Game {
     setupUI() {
         const $ = id => document.getElementById(id);
         const vrBtn = $('enterVR');
+        const xrBtn = $('webxr');
         const status = $('vrStatus');
         const setStatus = t => { status.textContent = t; };
-        if (navigator.xr && navigator.xr.isSessionSupported) {
-            navigator.xr.isSessionSupported('immersive-vr').then(ok => {
-                vrBtn.disabled = !ok;
-                if (!ok) setStatus('VR is not available in this browser. Open the page on your phone (Chrome on Android) or headset, over https (e.g. ngrok).');
-            }).catch(() => { vrBtn.disabled = true; });
+        const startXR = () => this.enterVR().catch(err => setStatus('Could not start WebXR: ' + err.message));
+        const xrCheck = navigator.xr && navigator.xr.isSessionSupported
+            ? navigator.xr.isSessionSupported('immersive-vr').catch(() => false)
+            : Promise.resolve(false);
+        if (this.isPhone) {
+            // Phone in a headset: our own stereo view keeps the motion sensors running.
+            vrBtn.onclick = () => this.enterPhoneVR();
+            xrCheck.then(ok => { xrBtn.hidden = !ok; });
+            xrBtn.onclick = startXR;
+            if (!window.isSecureContext) setStatus('Motion sensors need https: open the page through ngrok (see readme).');
         } else {
-            vrBtn.disabled = true;
-            setStatus(window.isSecureContext
-                ? 'WebXR is not available in this browser. Use Chrome on Android or a VR headset browser.'
-                : 'VR needs https: serve the page through ngrok (see readme).');
+            vrBtn.onclick = startXR;
+            xrCheck.then(ok => {
+                vrBtn.disabled = !ok;
+                if (!ok) {
+                    setStatus(window.isSecureContext
+                        ? 'VR is not available in this browser. Open the page on your phone or VR headset.'
+                        : 'VR needs https: serve the page through ngrok (see readme).');
+                }
+            });
         }
-        vrBtn.onclick = () => this.enterVR().catch(err => setStatus('Could not start VR: ' + err.message));
         $('play').onclick = () => this.playFlat();
+        const lens = $('lens');
+        lens.value = this.stereo.lens ? 'on' : 'off';
+        lens.onchange = () => this.stereo.setLens(lens.value === 'on');
+        document.addEventListener('fullscreenchange', () => {
+            if (!document.fullscreenElement && this.stereo.active) this.exitPhoneVR();
+        });
 
         const sens = $('sens');
         sens.value = String(this.motion.sensitivity);
@@ -142,24 +163,22 @@ class Game {
         const enableBtn = $('enableMotion');
         enableBtn.hidden = !this.motion.needsPermission;
         const refresh = () => { enableBtn.hidden = !this.motion.needsPermission; };
-        enableBtn.onclick = () => this.motion.enable().then(refresh);
-        this.motion.enable().then(refresh);
+        enableBtn.onclick = () => this.enableSensors().then(refresh);
+        this.enableSensors().then(refresh);
         // Browsers that ask for sensor permission only allow it from a tap or click.
-        const firstTouch = () => {
-            if (this.motion.listening) return;
-            this.motion.enable().then(refresh);
-        };
-        $('title').addEventListener('pointerdown', firstTouch);
+        $('title').addEventListener('pointerdown', () => this.enableSensors().then(refresh));
+        setInterval(() => { if (this.state === 'title') refresh(); }, 1000);
         this.motion.onStep = () => { this.hud.stepFlash = 0.2; };
         this.motion.onJump = () => { this.hud.jumpFlash = 0.45; };
         this.titleUI = { meter: $('meterBar'), steps: $('stepCount'), jumps: $('jumpCount'), status: $('motionStatus') };
 
         const canvas = this.renderer.domElement;
+        canvas.addEventListener('pointerdown', () => { if (this.isPhone) this.enableSensors(); });
         canvas.addEventListener('click', () => {
             if (this.state === 'paused') this.togglePause(false);
             if (!this.renderer.xr.isPresenting && !this.isTouch && this.state !== 'title') this.lockPointer();
         });
-        canvas.addEventListener('touchend', () => { if (this.state === 'paused') this.togglePause(false); });
+        canvas.addEventListener('touchend', () => { if (this.state === 'paused' && !this.renderer.xr.isPresenting) this.togglePause(false); });
         this.wasLocked = false;
         document.addEventListener('pointerlockchange', () => {
             const locked = document.pointerLockElement === canvas;
@@ -168,10 +187,16 @@ class Game {
         });
         document.addEventListener('visibilitychange', () => {
             if (document.hidden && this.state === 'playing' && !this.renderer.xr.isPresenting) this.togglePause(true);
+            if (!document.hidden && this.stereo.active) this.keepAwake();
         });
         window.addEventListener('keydown', e => {
             if (e.code === 'Enter' && this.state === 'title') this.playFlat();
         });
+    }
+
+    // Both permission requests start in the same tap (neither is awaited before the other).
+    enableSensors() {
+        return Promise.all([this.motion.enable(), this.phoneHead.enable()]);
     }
 
     lockPointer() {
@@ -181,16 +206,54 @@ class Game {
 
     playFlat() {
         this.sound.unlock();
-        this.motion.enable();
+        this.enableSensors();
         document.getElementById('title').classList.add('hidden');
         this.startGame();
         if (!this.isTouch) this.lockPointer();
     }
 
+    get inVR() {
+        return this.renderer.xr.isPresenting || this.stereo.active;
+    }
+
+    // Phone headset mode: fullscreen side-by-side stereo, gyroscope head tracking.
+    enterPhoneVR() {
+        // Permission prompts must come before requestFullscreen, which uses up the click.
+        this.sound.unlock();
+        this.enableSensors();
+        const el = document.documentElement;
+        const fs = el.requestFullscreen ? el.requestFullscreen({ navigationUI: 'hide' }) : null;
+        Promise.resolve(fs).catch(() => {}).then(() => {
+            if (screen.orientation && screen.orientation.lock) screen.orientation.lock('landscape').catch(() => {});
+        });
+        this.keepAwake();
+        this.stereo.active = true;
+        document.getElementById('title').classList.add('hidden');
+        this.needRecenter = true;
+        if (this.state === 'title' || this.state === 'gameover' || this.state === 'clear') this.startGame();
+        else if (this.state === 'paused') this.togglePause(false);
+    }
+
+    exitPhoneVR() {
+        this.stereo.active = false;
+        this.hasHead = false;
+        this.needRecenter = true;
+        this.camera.position.set(0, 0, 0);
+        this.camera.quaternion.identity();
+        if (this.wakeLock) { this.wakeLock.release().catch(() => {}); this.wakeLock = null; }
+        this.onResize();
+        this.togglePause(true);
+    }
+
+    keepAwake() {
+        if (!navigator.wakeLock || (this.wakeLock && !this.wakeLock.released)) return;
+        navigator.wakeLock.request('screen').then(l => { this.wakeLock = l; }).catch(() => {});
+    }
+
     async enterVR() {
         // Both need the click's user activation, so start them before any await.
         this.sound.unlock();
-        this.motion.enable();
+        this.enableSensors();
         const session = await navigator.xr.requestSession('immersive-vr', {
             optionalFeatures: ['local-floor', 'bounded-floor', 'hand-tracking'],
         });
@@ -230,6 +293,8 @@ class Game {
         this.dt = dt;
         this.gameTime += dt;
         const xr = this.renderer.xr.isPresenting;
+        const phoneVR = this.stereo.active && !xr;
+        const vr = xr || phoneVR;
         const now = performance.now() / 1000;
 
         if (xr && xrFrame) {
@@ -240,23 +305,30 @@ class Game {
                 this.headPos.set(p.x, p.y, p.z);
                 this.headQuat.set(o.x, o.y, o.z, o.w);
                 this.hasHead = true;
-                this.motion.feedHead(p.y, now, dt);
+                // Only real positional tracking (not a phone's emulated neck model) can see steps.
+                if (!pose.emulatedPosition) this.motion.feedHead(p.y, now, dt);
             }
+        } else if (phoneVR && this.phoneHead.update()) {
+            this.headQuat.copy(this.phoneHead.quat);
+            this.headPos.set(0, 1.6, 0);
+            this.hasHead = true;
         }
+        // A phone whose sensor stopped reporting (e.g. inside WebXR) can only use taps / holds.
+        this.sensorStale = this.motion.hasSensor && now - this.motion.lastSample > 1.5;
         this.motion.update(now, dt);
         const inp = this.inp = this.input.poll(dt, xr ? this.renderer.xr.getSession() : null, now);
         this.sound.update();
         if (inp.muteP) this.sound.toggleMute();
-        if (inp.pauseP && !xr) this.togglePause();
+        if (inp.pauseP && !vr) this.togglePause();
         if (inp.recenterP) this.needRecenter = true;
-        this.updateLook(inp, dt, xr);
+        this.updateLook(inp, dt, vr);
         inp.fwdX = this.fwd.x;
         inp.fwdZ = this.fwd.z;
 
         switch (this.state) {
             case 'title': this.updateTitle(); break;
-            case 'intro': this.updateIntro(xr); break;
-            case 'playing': this.updatePlaying(dt, inp, xr); break;
+            case 'intro': this.updateIntro(vr); break;
+            case 'playing': this.updatePlaying(dt, inp, vr); break;
             case 'dying': this.updateDying(dt); break;
             case 'seq': this.updateSeq(); break;
             case 'paused': if (inp.startP && !this.isTouch) this.togglePause(false); break;
@@ -267,9 +339,10 @@ class Game {
         }
         this.stateT += dt;
         this.animate(dt);
-        this.placeCamera(dt, xr);
+        this.placeCamera(dt, vr, phoneVR);
         this.hud.update(dt);
-        this.renderer.render(this.scene, this.camera);
+        if (phoneVR) this.stereo.render(this.scene, this.camera);
+        else this.renderer.render(this.scene, this.camera);
     }
 
     setState(s) {
@@ -277,8 +350,8 @@ class Game {
         this.stateT = 0;
     }
 
-    updateLook(inp, dt, xr) {
-        if (xr) {
+    updateLook(inp, dt, vr) {
+        if (vr) {
             if (inp.snap) this.rigYaw -= inp.snap * Math.PI / 6;
             if (this.needRecenter && this.hasHead) this.recenter();
             _q.setFromAxisAngle(UP, this.rigYaw).multiply(this.headQuat);
@@ -304,10 +377,15 @@ class Game {
         this.headBase.copy(this.headPos);
     }
 
-    placeCamera(dt, xr) {
+    placeCamera(dt, vr, phoneVR) {
         const P = this.player;
         const eyeY = P.y + P.eye;
-        if (xr) {
+        if (phoneVR) {
+            // With WebXR the browser poses the camera; here we do it from the gyroscope.
+            this.camera.position.copy(this.headPos);
+            this.camera.quaternion.copy(this.headQuat);
+        }
+        if (vr) {
             // Keep the head's rest position on Mario; small real head movements still add parallax.
             this.headBase.lerp(this.headPos, 1 - Math.exp(-dt / 8));
             _v.copy(this.headBase).applyAxisAngle(UP, this.rigYaw);
@@ -362,14 +440,14 @@ class Game {
         this.sound.stopMusic();
     }
 
-    updateIntro(xr) {
+    updateIntro(vr) {
         if (this.stateT < 2.4) return;
         this.setState('playing');
         this.hud.clearMessage();
         this.fadeTarget = 0;
         this.needRecenter = true; // forward = wherever you face when the level starts
         this.sound.music('overworld');
-        this.hud.hint(xr
+        this.hud.hint(vr
             ? 'Walk in place to move, jog to run, hop (or tap) to jump. Turn to steer.'
             : this.isTouch
                 ? 'Drag to look, hold to walk, tap to jump'
@@ -413,7 +491,7 @@ class Game {
         }
     }
 
-    updatePlaying(dt, inp, xr) {
+    updatePlaying(dt, inp, vr) {
         const P = this.player;
         if (this.freezeT > 0) { this.freezeT -= dt; return; }
 
@@ -454,11 +532,17 @@ class Game {
         if (!this.checkpoint && this.area === 'over' && P.x > CHECKPOINT.x) this.checkpoint = true;
         this.updateFire(dt, inp);
 
-        if (this.area === 'over' && P.x + P.hx >= POLE_X - 0.08) { this.runSeq(this.seqFlag(xr)); return; }
+        if (this.renderer.xr.isPresenting && this.sensorStale && !this.warnedSensor) {
+            this.warnedSensor = true;
+            this.hud.hint(this.isPhone
+                ? 'Phone motion sensors are paused in WebXR mode. Tap to jump, hold to walk, or use the Enter VR button instead.'
+                : 'Motion sensor paused: tap to jump, hold to walk.', 8);
+        }
+        if (this.area === 'over' && P.x + P.hx >= POLE_X - 0.08) { this.runSeq(this.seqFlag(vr)); return; }
 
         const pipe = P.onGround && P.groundSolid && P.groundSolid.pipe;
         if (pipe && pipe.warp && Math.hypot(P.x - pipe.cx, P.z - pipe.cz) < 0.8) {
-            this.hud.hint(xr ? 'Look down into the pipe to enter it' : 'Look down (or press C) to enter the pipe', 0.3);
+            this.hud.hint(vr ? 'Look down into the pipe to enter it' : 'Look down (or press C) to enter the pipe', 0.3);
             this.lookDownT = inp.crouch ? 1 : this.lookPitch < -0.95 ? this.lookDownT + dt : 0;
             if (this.lookDownT > 0.45) { this.lookDownT = 0; this.runSeq(this.seqPipeDown(pipe)); return; }
         } else {
@@ -781,7 +865,7 @@ class Game {
     gameOver() {
         this.setState('gameover');
         this.fadeTarget = 0.85;
-        this.hud.message('GAME OVER', this.renderer.xr.isPresenting ? 'Hop or tap to play again' : 'Press ENTER or SPACE to play again');
+        this.hud.message('GAME OVER', this.inVR || this.isTouch ? 'Hop or tap to play again' : 'Press ENTER or SPACE to play again');
         this.sound.play('gameover');
     }
 
@@ -863,7 +947,7 @@ class Game {
         P.state = 'normal';
     }
 
-    *seqFlag(xr) {
+    *seqFlag(vr) {
         const P = this.player, L = this.level;
         P.state = 'pole';
         P.vx = P.vy = P.vz = 0;
@@ -939,7 +1023,7 @@ class Game {
         }
         yield* this.wait(0.8);
         this.setState('clear');
-        this.hud.message('COURSE CLEAR!', `Thank you Mario!\nSCORE ${this.score}\n\n${xr ? 'Hop or tap' : 'Press ENTER or SPACE'} to play again`);
+        this.hud.message('COURSE CLEAR!', `Thank you Mario!\nSCORE ${this.score}\n\n${vr || this.isTouch ? 'Hop or tap' : 'Press ENTER or SPACE'} to play again`);
     }
 
     // ------------------------------------------------------------------ per-frame visuals

@@ -70,7 +70,7 @@ export class Hud {
 
     update(dt) {
         const g = this.g;
-        const vr = g.renderer.xr.isPresenting;
+        const vr = g.inVR;
         const showHud = g.state !== 'title';
         const score = String(g.score).padStart(6, '0');
         const coins = String(g.coins).padStart(2, '0');
@@ -90,20 +90,19 @@ export class Hud {
         const msgKey = this.msg ? this.msg.title + '|' + this.msg.sub : '';
         if (this.text.msg !== msgKey) {
             this.text.msg = msgKey;
-            this.el.msg.classList.toggle('hidden', !this.msg);
             if (this.msg) {
                 this.el.msgTitle.textContent = this.msg.title;
                 this.el.msgSub.textContent = this.msg.sub;
             }
         }
+        this.el.msg.classList.toggle('hidden', !this.msg || vr);
         this.set('hint', this.el.hint, hint);
         this.el.hint.classList.toggle('hidden', !hint || vr);
         this.el.cross.classList.toggle('hidden', !showHud || vr || g.state !== 'playing');
-        this.el.fade.style.opacity = String(g.fade);
         const tint = g.tint;
         this.el.fade.style.background = g.fade > 0.01 ? '#000' : tint.css;
-        if (g.fade <= 0.01) this.el.fade.style.opacity = String(tint.alpha);
-        if (this.el.motion) this.el.motion.className = this.jumpFlash > 0 ? 'jump' : this.stepFlash > 0 ? 'step' : '';
+        this.el.fade.style.opacity = vr ? '0' : String(g.fade > 0.01 ? g.fade : tint.alpha);
+        if (this.el.motion) this.el.motion.className = this.jumpFlash > 0 ? 'jump' : this.stepFlash > 0 ? 'step' : g.sensorStale ? 'stale' : '';
 
         // VR
         this.vr.visible = vr;
@@ -113,7 +112,7 @@ export class Hud {
         if (g.fade > 0.01) { veil.color.set(0x000000); veil.opacity = g.fade; } else { veil.color.set(tint.color); veil.opacity = tint.alpha; }
         this.reticle.visible = g.state === 'playing';
 
-        const barKey = [score, coins, time, lives, this.stepFlash > 0, this.jumpFlash > 0, showHud].join('|');
+        const barKey = [score, coins, time, lives, this.stepFlash > 0, this.jumpFlash > 0, showHud, g.sensorStale].join('|');
         if (barKey !== this.bar.key) {
             this.bar.key = barKey;
             const c = this.bar.ctx;
@@ -130,8 +129,8 @@ export class Hud {
                     c.fillText(a, x, 24);
                     c.fillText(b, x, 70);
                 });
-                // Body-motion indicator: green = step detected, yellow = hop detected.
-                c.fillStyle = this.jumpFlash > 0 ? '#ffd83a' : this.stepFlash > 0 ? '#44e060' : 'rgba(255,255,255,0.25)';
+                // Body-motion indicator: green = step, yellow = hop, red = motion sensor not reporting.
+                c.fillStyle = this.jumpFlash > 0 ? '#ffd83a' : this.stepFlash > 0 ? '#44e060' : g.sensorStale ? '#ff3030' : 'rgba(255,255,255,0.25)';
                 c.beginPath(); c.arc(985, 64, 16, 0, Math.PI * 2); c.fill();
             }
             this.bar.tex.needsUpdate = true;

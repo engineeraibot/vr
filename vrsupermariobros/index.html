@@ -24,6 +24,7 @@
         #h-motion { width: 12px; height: 12px; border-radius: 50%; background: rgba(255,255,255,0.25); margin-top: 6px; }
         #h-motion.step { background: #44e060; }
         #h-motion.jump { background: #ffd83a; }
+        #h-motion.stale { background: #ff3030; }
         #crosshair {
             position: fixed; left: 50%; top: 50%; width: 14px; height: 14px; margin: -7px 0 0 -7px; z-index: 15;
             border: 2px solid rgba(255,255,255,0.7); border-radius: 50%; pointer-events: none;
@@ -68,6 +69,7 @@
         #enterVR { background: var(--red); }
         #play { background: #1c9a2c; }
         #enableMotion { background: #2a64d8; padding: 12px 18px; font-size: 11px; margin-top: 10px; }
+        #webxr { background: rgba(0,0,0,0.35); padding: 10px 16px; font-size: 10px; box-shadow: none; margin-top: 12px; }
         #vrStatus { font-size: 9px; line-height: 1.7; color: #ffe0c0; min-height: 1em; margin: 14px 0 0; }
         .box { margin-top: 18px; padding: 14px; border-radius: 10px; background: rgba(0,0,0,0.28); text-align: left; }
         .box h2 { font-size: 12px; margin: 0 0 10px; color: #ffe680; }
@@ -104,6 +106,7 @@
             <button id="enterVR">Enter VR</button>
             <button id="play">Play on screen</button>
         </div>
+        <button id="webxr" hidden>WebXR mode (no body controls on phones)</button>
         <p id="vrStatus"></p>
 
         <div class="box">
@@ -120,6 +123,12 @@
                         <option value="1.4">High</option>
                     </select>
                 </label>
+                <label>Lens correction
+                    <select id="lens">
+                        <option value="on">On</option>
+                        <option value="off">Off</option>
+                    </select>
+                </label>
             </div>
             <p id="motionStatus"></p>
             <button id="enableMotion" hidden>Enable motion sensors</button>
@@ -128,12 +137,13 @@
         <div class="box">
             <details>
                 <summary>All controls</summary>
-                <p><b>Phone VR headset</b></p>
+                <p><b>Phone VR headset</b> (Enter VR: the phone goes fullscreen side by side; turn it sideways into the headset)</p>
                 <ul>
                     <li>Look around / steer: turn your head and body</li>
                     <li>Walk: walk in place. Run: jog in place</li>
                     <li>Jump: hop, or tap the screen / headset button</li>
                     <li>No room to move? Hold the screen / button to walk forward</li>
+                    <li>To leave VR: use the phone's back gesture / button</li>
                     <li>Warp pipe: stand on it and look down into it</li>
                     <li>Fire Mario: look at an enemy to throw fireballs</li>
                 </ul>
