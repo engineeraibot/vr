@@ -6,9 +6,11 @@ steered with your hands: the phone's back camera sees them and MediaPipe tracks 
 ## Run
 
 ```
-python -m http.server
+python serve.py        (from the vr folder; like http.server but without caching)
 ngrok http 8000
 ```
+
+`serve.py` stops the phone from running an old cached copy of the code after an update.
 
 Open the ngrok https URL on your phone, go to `/vrkart/`, press **Test hand steering** to check the
 camera, then **Enter VR** and put the phone sideways into the headset. Sit down.
@@ -20,6 +22,12 @@ camera window). Hand tracking needs a reasonably lit room.
 
 - Both hands up in front of you = drive. Tilt them like a steering wheel: left hand higher turns right,
   right hand higher turns left (there is a swap option). One hand = slow, no hands = the kart stops.
+- Hold your hands at chin height, 30-50 cm from your face, open with palms facing you: the camera can't
+  see hands held low like on a real wheel. Before each race a big screen shows what the camera sees and
+  the lights start once both hands are detected; during the race a small dashboard screen shows it.
+- If hands are rarely detected in VR, try **Hand tracker: CPU** on the title screen (in VR the GPU is
+  also busy drawing both eyes). The camera views show how many checks per second the tracker manages.
+- Tilting your head doesn't steer: the head tilt is measured with the gyroscope and removed.
 - Look around by turning your head.
 - Orange arrow pads = turbo. You need speed to clear the jump over the lake; fall in and Lakitu fishes you out.
 - No camera: tilt your head to steer and hold the screen to drive.

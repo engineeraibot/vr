@@ -55,6 +55,9 @@ class Game {
 
         this.sound = new Sound();
         this.hands = new HandWheel();
+        // In the headset the camera tilts with your head: remove that tilt from the steering.
+        this.headRoll = 0;
+        this.hands.rollFn = () => (this.inVR && this.hands.facing === 'environment' ? this.headRoll : 0);
         this.phoneHead = new PhoneHead();
         this.stereo = new StereoView(r);
         this.track = new Track();
@@ -65,6 +68,38 @@ class Game {
         this.cockpit.group.position.set(0, 0.8, -0.42);
         this.cockpit.group.scale.setScalar(0.85);
         this.player.model.body.add(this.cockpit.group);
+        // Dashboard screen with the live camera view, so you can see where your hands are in VR.
+        const dash = this.dash = { canvas: Object.assign(document.createElement('canvas'), { width: 320, height: 240 }), t: 0 };
+        dash.tex = new THREE.CanvasTexture(dash.canvas);
+        dash.tex.colorSpace = THREE.SRGBColorSpace;
+        dash.mesh = new THREE.Mesh(new THREE.PlaneGeometry(0.36, 0.27), new THREE.MeshBasicMaterial({ map: dash.tex }));
+        dash.mesh.position.set(-0.46, 0.84, -0.6);
+        dash.mesh.rotation.set(-0.38, 0.5, 0, 'YXZ');
+        this.player.model.body.add(dash.mesh);
+        // Big screen in front of you for the hand check before the start lights.
+        const big = this.big = {
+            canvas: Object.assign(document.createElement('canvas'), { width: 480, height: 430 }),
+            sub: Object.assign(document.createElement('canvas'), { width: 480, height: 360 }),
+            t: 0,
+        };
+        big.ctx = big.canvas.getContext('2d');
+        big.tex = new THREE.CanvasTexture(big.canvas);
+        big.tex.colorSpace = THREE.SRGBColorSpace;
+        big.mesh = new THREE.Mesh(new THREE.PlaneGeometry(0.95, 0.95 * 430 / 480), new THREE.MeshBasicMaterial({ map: big.tex }));
+        big.mesh.position.set(0, 1.05, -1.1);
+        big.mesh.visible = false;
+        this.player.model.body.add(big.mesh);
+        // Debug passthrough: the camera picture (and what the tracker sees) fills your view.
+        const pass = this.pass = { canvas: Object.assign(document.createElement('canvas'), { width: 640, height: 480 }), t: 0 };
+        pass.tex = new THREE.CanvasTexture(pass.canvas);
+        pass.tex.colorSpace = THREE.SRGBColorSpace;
+        pass.mesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1),
+            new THREE.MeshBasicMaterial({ map: pass.tex, depthTest: false, depthWrite: false }));
+        pass.mesh.renderOrder = 999;
+        pass.mesh.position.z = -1;
+        pass.mesh.visible = false;
+        this.camera.add(pass.mesh);
+        this.passthrough = new URLSearchParams(location.search).has('passthrough');
         this.cpus = CHARACTERS.slice(1).map((ch, i) => new CpuKart(this, ch, CPU_SKILL[i]));
         this.karts = [this.player, ...this.cpus];
         this.lakitu = buildLakitu();
@@ -119,6 +154,12 @@ class Game {
             this.hands.start(facing.value);
         };
         facing.onchange = () => { if (this.hands.status !== 'off') this.hands.start(facing.value); };
+        const passBox = $('passthrough');
+        passBox.checked = this.passthrough;
+        passBox.onchange = () => { this.passthrough = passBox.checked; };
+        const tracker = $('tracker');
+        tracker.value = this.hands.delegate;
+        tracker.onchange = () => this.hands.setDelegate(tracker.value);
         const swap = $('swap');
         swap.checked = this.hands.swap;
         swap.onchange = () => this.hands.setSwap(swap.checked);
@@ -142,6 +183,7 @@ class Game {
             if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) e.preventDefault();
             this.keys.add(e.code);
             if (e.code === 'KeyC') this.view = this.view === 'first' ? 'chase' : 'first';
+            if (e.code === 'KeyV') this.togglePassthrough();
             if (e.code === 'KeyM') this.sound.toggleMute();
             if (e.code === 'Enter' || e.code === 'Space') this.tapQueued = true;
             if (e.code === 'Enter' && this.state === 'title') this.playFlat();
@@ -154,7 +196,14 @@ class Game {
             this.touches.clear();
             for (const t of e.touches) this.touches.set(t.identifier, t.clientX / window.innerWidth);
         };
-        canvas.addEventListener('touchstart', e => { touch(e); this.tapQueued = true; this.phoneHead.enable(); }, { passive: false });
+        canvas.addEventListener('touchstart', e => {
+            touch(e);
+            this.tapQueued = true;
+            this.phoneHead.enable();
+            // Double tap (the headset button twice) toggles the camera passthrough.
+            const now = performance.now();
+            if (now - (this.lastTap || 0) < 350) { this.togglePassthrough(); this.lastTap = 0; } else this.lastTap = now;
+        }, { passive: false });
         canvas.addEventListener('touchmove', touch, { passive: false });
         canvas.addEventListener('touchend', touch, { passive: false });
         canvas.addEventListener('touchcancel', touch, { passive: false });
@@ -162,6 +211,13 @@ class Game {
         document.addEventListener('fullscreenchange', () => {
             if (!document.fullscreenElement && this.stereo.active) this.exitPhoneVR();
         });
+    }
+
+    togglePassthrough() {
+        this.passthrough = !this.passthrough;
+        const box = document.getElementById('passthrough');
+        if (box) box.checked = this.passthrough;
+        this.hud.message(this.passthrough ? 'PASSTHROUGH ON' : 'PASSTHROUGH OFF', 'Double tap to toggle', 1);
     }
 
     enterPhoneVR() {
@@ -243,6 +299,8 @@ class Game {
         this.sound.startEngine();
         this.lastLap = 0;
         this.waitT = 0;
+        this.handsOk = false;
+        this.handsCheckT = 0;
         this.resultsShown = false;
         this.lakitu.lights.forEach(l => l.material.color.set(0x331111));
     }
@@ -253,6 +311,19 @@ class Game {
         if (this.hands.status === 'loading' && this.waitT < 25) {
             this.stateT = 0;
             this.hud.message('GET READY', 'Starting the camera and hand tracking...', 0.2);
+            return;
+        }
+        // Hand check: both hands must be seen for a second before the lights start.
+        if (this.hands.status === 'running' && !this.handsOk) {
+            this.stateT = 0;
+            const both = this.ctl.hands === 2;
+            this.handsCheckT = both ? this.handsCheckT + dt : Math.max(0, this.handsCheckT - dt * 0.5);
+            this.hud.clearMessage();
+            this.holdT = this.touches.size ? (this.holdT || 0) + dt : 0;
+            if (this.handsCheckT > 1 || this.holdT > 1.2 || this.keys.has('Enter') || this.waitT > 45) {
+                this.handsOk = true;
+                this.sound.play('lap');
+            }
             return;
         }
         const t = this.stateT;
@@ -277,7 +348,11 @@ class Game {
     }
 
     handsHint() {
-        if (this.hands.status === 'running') return 'Raise both hands like holding a wheel';
+        if (this.hands.status === 'running') {
+            return this.inVR
+                ? 'Both hands up in front of you, open, palms facing you.\nThe screen on the dashboard shows what the camera sees.'
+                : 'Raise both hands like holding a wheel';
+        }
         if (this.inVR) return 'No camera: tilt your head to steer, hold the screen to drive';
         if (this.isTouch) return 'Hold the left / right side of the screen to drive';
         return 'Arrow keys: drive and steer';
@@ -428,8 +503,7 @@ class Game {
             source = 'hands';
         } else if (this.inVR) {
             // No camera: tilt your head to steer, hold the screen / headset button to drive.
-            _v.set(1, 0, 0).applyQuaternion(this.headQuat);
-            const roll = -_v.y;
+            const roll = this.headRoll;
             steer = Math.abs(roll) < 0.06 ? 0 : clamp((roll - Math.sign(roll) * 0.06) / 0.35, -1, 1);
             throttle = this.touches.size ? 1 : 0;
             source = 'tilt';
@@ -472,7 +546,11 @@ class Game {
         const dt = Math.min(this.clock.getDelta(), 0.05);
         const now = performance.now();
         this.stateT += dt;
-        if (this.inVR && this.phoneHead.update()) this.headQuat.copy(this.phoneHead.quat);
+        if (this.inVR && this.phoneHead.update()) {
+            this.headQuat.copy(this.phoneHead.quat);
+            _v.set(1, 0, 0).applyQuaternion(this.headQuat);
+            this.headRoll = -Math.asin(clamp(_v.y, -1, 1)); // clockwise = right ear down
+        }
         this.hands.update(now, dt);
         this.sound.update();
         const ctl = this.ctl = this.getControls(now / 1000);
@@ -511,7 +589,7 @@ class Game {
         if (this.hands.status !== 'off') this.hands.drawPreview(this.ui.preview);
         const h = this.hands;
         this.ui.camStatus.textContent = h.status === 'running'
-            ? `Camera OK (${h.facing === 'environment' ? 'back' : 'front'}). Detection ${Math.round(h.detectMs)} ms`
+            ? `Camera OK (${h.facing === 'environment' ? 'back' : 'front'}). Tracker ${h.activeDelegate}: ${Math.round(h.rate)} checks/s`
             : h.status === 'loading' ? 'Starting camera and downloading the hand model (~10 MB)...'
                 : h.status === 'error' ? 'Camera problem: ' + h.error : '';
     }
@@ -531,6 +609,33 @@ class Game {
         const seen = ctl.source !== 'hands' ? 2 : ctl.hands;
         this.cockpit.gloves[0].visible = seen >= 1;
         this.cockpit.gloves[1].visible = seen >= 2;
+        const big = this.big;
+        big.mesh.visible = this.state === 'countdown' && !this.handsOk && this.hands.status === 'running';
+        big.t -= dt;
+        if (big.mesh.visible && big.t <= 0) {
+            big.t = 1 / 15;
+            this.drawHandCheck();
+        }
+        this.stereo.lite = this.hands.status === 'running' || this.hands.status === 'loading';
+        const pass = this.pass;
+        pass.mesh.visible = this.passthrough && this.state !== 'title' && this.hands.status !== 'off';
+        pass.t -= dt;
+        if (pass.mesh.visible && pass.t <= 0) {
+            pass.t = 1 / 30;
+            this.hands.drawPreview(pass.canvas, { fit: true, dim: false, label: 'PASSTHROUGH - double tap to close' });
+            pass.tex.needsUpdate = true;
+            // Size the picture to the camera's field of view (~66 degrees wide, wider when zoomed out).
+            const w = 2 * Math.tan(THREE.MathUtils.degToRad(33)) / Math.min(1, this.hands.zoom || 1);
+            pass.mesh.scale.set(w, w * pass.canvas.height / pass.canvas.width, 1);
+        }
+        const dash = this.dash;
+        dash.mesh.visible = fp && this.hands.status !== 'off' && !big.mesh.visible;
+        dash.t -= dt;
+        if (dash.mesh.visible && dash.t <= 0) {
+            dash.t = 1 / 15;
+            this.hands.drawPreview(dash.canvas);
+            dash.tex.needsUpdate = true;
+        }
 
         // Lakitu hangs over the start line, then flies away.
         const L = this.lakitu.group;
@@ -547,6 +652,27 @@ class Game {
         const sx = P.x, sz = P.z;
         this.sun.position.set(sx + 30, 60, sz + 20);
         this.sun.target.position.set(sx, 0, sz);
+    }
+
+    drawHandCheck() {
+        const b = this.big, c = b.ctx;
+        this.hands.drawPreview(b.sub);
+        c.fillStyle = '#10204a';
+        c.fillRect(0, 0, 480, 430);
+        c.drawImage(b.sub, 0, 0);
+        const both = this.ctl.hands === 2;
+        c.textAlign = 'center';
+        c.fillStyle = both ? '#7dff6a' : '#ffd83a';
+        c.font = '17px "Press Start 2P", monospace';
+        c.fillText(both ? 'GREAT, HOLD THEM THERE' : 'SHOW BOTH HANDS', 240, 386);
+        c.fillStyle = '#fff';
+        c.font = '9px "Press Start 2P", monospace';
+        c.fillText('Chin height, 30-50 cm away, palms facing you. Hold screen: skip', 240, 408);
+        c.fillStyle = 'rgba(255,255,255,0.2)';
+        c.fillRect(40, 418, 400, 6);
+        c.fillStyle = '#7dff6a';
+        c.fillRect(40, 418, 400 * Math.min(1, this.handsCheckT), 6);
+        b.tex.needsUpdate = true;
     }
 
     placeCamera(dt) {

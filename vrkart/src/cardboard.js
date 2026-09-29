@@ -76,8 +76,10 @@ export class StereoView {
         this.eye = new THREE.PerspectiveCamera();
         this.eye.matrixAutoUpdate = false;
         this.eye.matrixWorldAutoUpdate = false;
-        this.rt = new THREE.WebGLRenderTarget(16, 16, { samples: 4 });
-        this.rt.texture.colorSpace = THREE.SRGBColorSpace;
+        // lite: leave GPU time for hand tracking (no MSAA, lower resolution, shadows every 2nd frame).
+        this.lite = false;
+        this.frameNo = 0;
+        this.rt = null;
         this.quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), new THREE.ShaderMaterial({
             uniforms: {
                 tDiffuse: { value: null },
@@ -129,8 +131,14 @@ export class StereoView {
         const V = VIEWERS[this.viewerId];
         r.getSize(this.size);
         const w = this.size.x / 2, h = this.size.y;
-        const pr = r.getPixelRatio();
+        const pr = Math.min(r.getPixelRatio(), this.lite ? 1.25 : 2);
         const rw = Math.max(1, Math.round(w * pr)), rh = Math.max(1, Math.round(h * pr));
+        const samples = this.lite ? 0 : 4;
+        if (!this.rt || this.rt.samples !== samples) {
+            if (this.rt) this.rt.dispose();
+            this.rt = new THREE.WebGLRenderTarget(rw, rh, { samples });
+            this.rt.texture.colorSpace = THREE.SRGBColorSpace;
+        }
         if (this.rt.width !== rw || this.rt.height !== rh) this.rt.setSize(rw, rh);
 
         // Physical layout of the screen in the headset (landscape, fullscreen).
@@ -153,7 +161,7 @@ export class StereoView {
         // Draw the shadow map once for both eyes.
         const autoShadow = r.shadowMap.autoUpdate;
         r.shadowMap.autoUpdate = false;
-        r.shadowMap.needsUpdate = true;
+        r.shadowMap.needsUpdate = !this.lite || this.frameNo++ % 2 === 0;
         for (let i = 0; i < 2; i++) {
             const side = i === 0 ? -1 : 1;
             const lensX = Wm / 2 + side * V.interLens / 2;

@@ -11,22 +11,24 @@ self.importScripts = (...urls) => {
 };
 
 let landmarker = null;
+let lastTs = 0;
 
-async function create(mp, model) {
+async function create(mp, model, confidence = 0.5, delegate = 'GPU') {
     const { FilesetResolver, HandLandmarker } = await import(`${mp}/vision_bundle.mjs`);
     const fileset = await FilesetResolver.forVisionTasks(`${mp}/wasm`);
     const options = delegate => ({
         baseOptions: { modelAssetPath: model, delegate },
         runningMode: 'VIDEO',
         numHands: 2,
-        minHandDetectionConfidence: 0.5,
-        minHandPresenceConfidence: 0.5,
-        minTrackingConfidence: 0.5,
+        minHandDetectionConfidence: confidence,
+        minHandPresenceConfidence: confidence,
+        minTrackingConfidence: confidence,
     });
+    const other = delegate === 'GPU' ? 'CPU' : 'GPU';
     try {
-        return await HandLandmarker.createFromOptions(fileset, options('GPU'));
+        return { lm: await HandLandmarker.createFromOptions(fileset, options(delegate)), delegate };
     } catch {
-        return HandLandmarker.createFromOptions(fileset, options('CPU'));
+        return { lm: await HandLandmarker.createFromOptions(fileset, options(other)), delegate: other };
     }
 }
 
@@ -34,11 +36,14 @@ self.onmessage = async e => {
     const msg = e.data;
     try {
         if (msg.type === 'init') {
-            landmarker = await create(msg.mp, msg.model);
-            self.postMessage({ type: 'ready' });
+            const made = await create(msg.mp, msg.model, msg.confidence, msg.delegate);
+            landmarker = made.lm;
+            self.postMessage({ type: 'ready', delegate: made.delegate });
         } else if (msg.type === 'frame') {
             const t0 = performance.now();
-            const res = landmarker.detectForVideo(msg.bitmap, msg.ts);
+            // MediaPipe refuses (permanently) timestamps that don't increase.
+            lastTs = Math.max(msg.ts, lastTs + 1);
+            const res = landmarker.detectForVideo(msg.bitmap, lastTs);
             msg.bitmap.close();
             self.postMessage({ type: 'result', landmarks: res.landmarks || [], ms: performance.now() - t0 });
         }

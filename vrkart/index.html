@@ -88,6 +88,9 @@
             <h2>Hand steering</h2>
             <p>Hold both hands up in front of the camera like on a steering wheel. Left hand higher turns right,
                 right hand higher turns left. No hands: the kart stops.</p>
+            <p>Tips: hold your hands at chin height, 30-50 cm from your face, open with palms facing you (the
+                camera can't see hands held low like on a real wheel). Before each race in VR a big screen shows
+                what the camera sees; the lights start once both hands are detected. Tilting your head doesn't steer.</p>
             <div class="hands">
                 <canvas id="handPreview" width="320" height="240"></canvas>
                 <div class="settings">
@@ -98,7 +101,14 @@
                             <option value="user">Front / webcam</option>
                         </select>
                     </label>
+                    <label>Hand tracker
+                        <select id="tracker">
+                            <option value="GPU">GPU (default)</option>
+                            <option value="CPU">CPU (try if hands are rarely detected in VR)</option>
+                        </select>
+                    </label>
                     <label><input type="checkbox" id="swap"> Swap left / right</label>
+                    <label><input type="checkbox" id="passthrough"> Debug: camera passthrough (in VR: double tap)</label>
                     <label><input type="checkbox" id="useHands"> Use hands when playing on screen</label>
                     <label>Laps
                         <select id="laps">
