@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>Whack-a-Mole VR</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root { --accent: #ff7a3a; --gold: #ffc14a; --card: rgba(40, 25, 15, 0.9); }
+        * { box-sizing: border-box; }
+        body { margin: 0; overflow: hidden; background: #000; font-family: Fredoka, 'Trebuchet MS', sans-serif; color: #fff; user-select: none; }
+        canvas { display: block; touch-action: none; }
+        .hidden { display: none !important; }
+
+        #hud { position: fixed; inset: 0; z-index: 20; pointer-events: none; font-weight: 700; text-shadow: 0 2px 6px rgba(0,0,0,.7); }
+        .hpanel {
+            position: absolute; top: 14px; background: rgba(40, 20, 10, 0.55); border: 2px solid var(--accent);
+            padding: 8px 14px; border-radius: 12px; font-size: 18px; backdrop-filter: blur(4px);
+        }
+        #h-left { left: 14px; }
+        #h-lives { right: 14px; display: flex; gap: 6px; font-size: 22px; }
+        .heart { transition: transform .25s, opacity .25s, filter .25s; }
+        .heart.lost { transform: scale(0.3); opacity: 0.25; filter: grayscale(1); }
+        #h-hands { position: absolute; left: 16px; bottom: 14px; font-size: 14px; letter-spacing: .5px; }
+        #exit {
+            position: absolute; right: 14px; bottom: 14px; pointer-events: auto; font-size: 13px; padding: 6px 12px;
+            background: rgba(0,0,0,.5); color: var(--accent); border: 1px solid var(--accent); border-radius: 8px; box-shadow: none;
+        }
+        #flash { position: fixed; inset: 0; z-index: 15; pointer-events: none; }
+        #message {
+            position: fixed; left: 50%; top: 12px; transform: translateX(-50%); z-index: 25; width: min(560px, calc(100% - 300px));
+            text-align: center; pointer-events: none; white-space: pre-line; text-shadow: 0 3px 8px rgba(0,0,0,.8);
+            background: rgba(40, 20, 10, 0.55); border-radius: 14px; padding: 8px 14px;
+        }
+        #msg-title { font-size: clamp(24px, 4.5vw, 44px); font-weight: 700; color: var(--gold); line-height: 1.1; }
+        #msg-sub { font-size: clamp(12px, 1.6vw, 16px); line-height: 1.4; margin-top: 4px; }
+        #msg-sub:empty { display: none; }
+        @media (max-width: 560px) { #message { top: 84px; width: calc(100% - 28px); } }
+
+        #title {
+            position: fixed; inset: 0; z-index: 30; display: flex; align-items: center; justify-content: center; padding: 16px;
+            overflow-y: auto; background: radial-gradient(ellipse at center, rgba(0,0,0,.35), rgba(0,0,0,.75));
+        }
+        .card {
+            width: min(780px, 100%); max-height: 100%; overflow-y: auto; margin: auto; padding: 24px 26px; text-align: center;
+            background: var(--card); border: 3px solid var(--accent); border-radius: 20px; box-shadow: 0 20px 60px rgba(0,0,0,.6);
+        }
+        h1 { margin: 0; font-size: clamp(30px, 6vw, 50px); color: var(--accent); line-height: 1.1; }
+        h1 small { display: block; font-size: 0.42em; color: var(--gold); letter-spacing: 3px; margin-top: 6px; }
+        .sub { font-size: 15px; line-height: 1.45; margin: 12px auto 16px; max-width: 560px; }
+        .buttons { display: flex; gap: 14px; justify-content: center; flex-wrap: wrap; }
+        button {
+            font-family: inherit; cursor: pointer; border: none; border-radius: 12px; font-weight: 700; letter-spacing: 1px;
+            padding: 14px 26px; font-size: 19px; color: #2a1500; transition: transform .1s;
+            background: linear-gradient(180deg, #ffc14a, #ff5d3a); box-shadow: 0 6px 0 #8a3a1a, 0 10px 20px rgba(0,0,0,.4);
+        }
+        button:hover { transform: translateY(-2px); }
+        button:active { transform: translateY(2px); box-shadow: 0 2px 0 #8a3a1a; }
+        #play { background: linear-gradient(180deg, #b6e36a, #4fa32a); box-shadow: 0 6px 0 #2a5a14, 0 10px 20px rgba(0,0,0,.4); }
+        #camStart { font-size: 14px; padding: 9px 14px; box-shadow: 0 4px 0 #8a3a1a; }
+        #vrStatus { font-size: 13px; color: #ffd2b8; min-height: 1em; margin: 12px 0 0; }
+        .name-row { margin: 16px 0 4px; font-size: 15px; }
+        .name-row input {
+            font-family: inherit; font-size: 15px; padding: 7px 10px; border-radius: 8px; width: 200px;
+            border: 2px solid var(--accent); background: rgba(0,0,0,.4); color: #fff; margin-left: 6px;
+        }
+        .box { margin-top: 16px; padding: 14px 16px; border-radius: 12px; background: rgba(0,0,0,0.3); text-align: left; }
+        .box h2 { font-size: 17px; margin: 0 0 8px; color: var(--accent); }
+        .box p, .box li { font-size: 14px; line-height: 1.5; margin: 4px 0; }
+        .hands { display: flex; gap: 14px; flex-wrap: wrap; align-items: flex-start; }
+        #handPreview { width: 256px; max-width: 100%; aspect-ratio: 4 / 3; border-radius: 8px; background: #111; }
+        .settings { flex: 1; min-width: 220px; display: flex; flex-direction: column; gap: 8px; font-size: 14px; }
+        select { font-family: inherit; font-size: 13px; padding: 3px; margin-left: 4px; }
+        details summary { cursor: pointer; font-size: 17px; color: var(--accent); font-weight: 600; }
+        details ul { padding-left: 20px; }
+        #camStatus { font-size: 12px; color: #ffd2b8; }
+        #board table { width: 100%; font-size: 14px; border-collapse: collapse; }
+        #board th, #board td { padding: 4px 8px; border-bottom: 1px solid rgba(255,255,255,0.1); text-align: left; }
+        #board th { color: var(--gold); font-size: 11px; text-transform: uppercase; letter-spacing: 1px; }
+        #board td.rank { width: 24px; color: var(--accent); font-weight: 700; }
+        #board td.score { text-align: right; font-variant-numeric: tabular-nums; }
+        #board tr.hl td { background: rgba(255, 122, 58, 0.25); font-weight: 700; }
+        #board .empty { opacity: .65; text-align: center; margin: 6px 0 0; }
+        .fine { font-size: 12px; opacity: .7; margin-top: 14px; }
+    </style>
+</head>
+<body>
+
+<div id="flash"></div>
+<div id="hud" class="hidden">
+    <div id="h-left" class="hpanel"><div>Level <span id="h-level">1</span></div><div>Score <span id="h-score">0</span></div></div>
+    <div id="h-lives" class="hpanel"><span class="heart">❤️</span><span class="heart">❤️</span><span class="heart">❤️</span></div>
+    <div id="h-hands"></div>
+    <button id="exit">✕ Menu (Esc)</button>
+</div>
+<div id="message" class="hidden"><div id="msg-title"></div><div id="msg-sub"></div></div>
+
+<div id="title">
+    <div class="card">
+        <h1>🔨 Whack-a-Mole 🐹<small>VR PASSTHROUGH</small></h1>
+        <p class="sub">Moles pop out of little floating islands <b>in your own room</b>. Swat them with your real hands
+            before they duck back down, and don't whack the bombs! 3 lives, faster every 10 moles, a life back every 5 levels.</p>
+        <div class="buttons">
+            <button id="enterVR">Enter VR</button>
+            <button id="play">Play on screen</button>
+        </div>
+        <p id="vrStatus"></p>
+        <div class="name-row"><label>Your name <input id="name" maxlength="20" placeholder="Player"></label></div>
+
+        <div class="box">
+            <h2>Hands and camera</h2>
+            <p>In the headset the phone's back camera shows you the room and watches your hands. Keep your hands up in
+                front of you where the camera can see them; a yellow ring shows each hand it's tracking.</p>
+            <div class="hands">
+                <canvas id="handPreview" width="320" height="240"></canvas>
+                <div class="settings">
+                    <button id="camStart">Test the camera</button>
+                    <label>Camera
+                        <select id="camFacing">
+                            <option value="environment">Back (phone in headset)</option>
+                            <option value="user">Front / webcam</option>
+                        </select>
+                    </label>
+                    <label>Background
+                        <select id="background">
+                            <option value="pass">Passthrough (your room)</option>
+                            <option value="garden">Cartoon garden</option>
+                        </select>
+                    </label>
+                    <label>Camera field of view
+                        <select id="fov">
+                            <option value="auto">Auto (66°, wider on ultra-wide)</option>
+                            <option value="55">55°</option>
+                            <option value="60">60°</option>
+                            <option value="70">70°</option>
+                            <option value="75">75°</option>
+                            <option value="80">80°</option>
+                            <option value="90">90°</option>
+                            <option value="100">100°</option>
+                            <option value="110">110°</option>
+                        </select>
+                    </label>
+                    <label>Hand tracker
+                        <select id="tracker">
+                            <option value="GPU">GPU (default)</option>
+                            <option value="CPU">CPU (try if hands are rarely detected in VR)</option>
+                        </select>
+                    </label>
+                    <label><input type="checkbox" id="handsInFront"> Real hands in front of the moles</label>
+                    <label><input type="checkbox" id="useHands"> Use the camera when playing on screen</label>
+                    <label>Headset lenses
+                        <select id="viewer">
+                            <option value="v2">Cardboard v2 (most headsets)</option>
+                            <option value="v1">Cardboard v1</option>
+                            <option value="none">No correction</option>
+                        </select>
+                    </label>
+                    <span id="camStatus"></span>
+                </div>
+            </div>
+        </div>
+
+        <div class="box">
+            <h2>🏆 Leaderboard</h2>
+            <div id="board"></div>
+        </div>
+
+        <div class="box">
+            <details>
+                <summary>How to play</summary>
+                <p><b>Phone in a VR headset</b> (the back camera must not be covered)</p>
+                <ul>
+                    <li>Stand or sit with some space around you. Enter VR and put the phone sideways into the headset</li>
+                    <li>Swat the mole holding the START sign to begin. Turn your head to see all nine holes</li>
+                    <li>🐹 Mole = +1 point. 💣 Bomb = −1 life</li>
+                    <li>Double tap the screen (headset button) to recenter the holes in front of you</li>
+                    <li>No camera? Look at a mole and tap to whack it</li>
+                    <li>If the room seems to swing when you turn your head, change <i>Camera field of view</i>:
+                        smaller if the room moves against your head, bigger if it follows your head</li>
+                    <li>Leave VR with the phone's back gesture</li>
+                </ul>
+                <p><b>On a screen</b></p>
+                <ul>
+                    <li>Webcam: stand back so the camera sees your hands and swat the moles on screen</li>
+                    <li>Or click / tap the moles, or use the keys Q W E / A S D / Z X C (one per hole)</li>
+                    <li>M: mute. Esc: back to this menu</li>
+                </ul>
+            </details>
+        </div>
+        <p class="fine">Based on the eye-toy Whack-a-Mole. All models, sounds and music are generated in code.</p>
+    </div>
+</div>
+
+<script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.160/build/three.module.js",
+      "three/examples/jsm/": "https://cdn.jsdelivr.net/npm/three@0.160/examples/jsm/"
+    }
+  }
+</script>
+<script type="module" src="./src/main.js"></script>
+
+</body>
+</html>

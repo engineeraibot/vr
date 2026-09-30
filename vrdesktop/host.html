@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>VR Desktop - share this PC</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        :root { --bg: #0b0f17; --panel: #141b28; --line: #2a3650; --text: #e6ecf5; --muted: #93a3bd; --blue: #3b82f6; --green: #22c55e; --red: #ef4444; }
+        * { box-sizing: border-box; }
+        body { margin: 0; background: var(--bg); color: var(--text); font-family: system-ui, -apple-system, 'Segoe UI', sans-serif; }
+        main { width: min(760px, 100%); margin: 0 auto; padding: 24px 16px 40px; }
+        h1 { margin: 0; font-size: 26px; }
+        h1 span { color: var(--blue); }
+        .sub { margin: 6px 0 20px; color: var(--muted); font-size: 14px; line-height: 1.5; }
+        .card { padding: 18px; border-radius: 14px; background: var(--panel); border: 1px solid var(--line); margin-bottom: 16px; }
+        .card h2 { margin: 0 0 12px; font-size: 15px; }
+        .codebox { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; }
+        #code { font: 700 44px ui-monospace, 'Cascadia Mono', Consolas, monospace; letter-spacing: 8px; color: #fff; }
+        .muted { color: var(--muted); font-size: 13px; line-height: 1.6; }
+        button {
+            font: inherit; font-weight: 600; cursor: pointer; border: none; border-radius: 10px; color: #fff;
+            padding: 12px 18px; font-size: 15px; background: #26324a;
+        }
+        button:disabled { opacity: 0.45; cursor: default; }
+        #share { background: var(--blue); font-size: 17px; padding: 14px 24px; }
+        #share.stop { background: var(--red); }
+        .row { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
+        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px 18px; font-size: 13px; }
+        .grid label { display: flex; flex-direction: column; gap: 5px; color: var(--muted); }
+        select { font: inherit; font-size: 14px; padding: 6px; border-radius: 6px; background: #0d131e; color: var(--text); border: 1px solid var(--line); }
+        #status { font-size: 14px; margin: 14px 0 0; line-height: 1.6; }
+        #status[data-state="connected"] { color: var(--green); }
+        #stats { font: 12px ui-monospace, Consolas, monospace; color: var(--muted); min-height: 1.4em; margin-top: 4px; }
+        video { width: 100%; max-height: 240px; margin-top: 14px; border-radius: 10px; background: #000; border: 1px solid var(--line); }
+        code { background: #0d131e; padding: 1px 5px; border-radius: 4px; }
+        .warn { color: #fbbf24; font-size: 13px; line-height: 1.6; }
+        .check { display: flex; gap: 8px; align-items: flex-start; font-size: 14px; }
+        .hidden { display: none !important; }
+        ol { padding-left: 20px; margin: 0; }
+        li { margin: 4px 0; }
+    </style>
+</head>
+<body>
+<main>
+    <h1>VR <span>Desktop</span> &middot; this PC</h1>
+    <p class="sub">Shares this screen with the phone in your headset. Keep this tab open while you watch
+        (it can be behind other windows).</p>
+    <p id="originWarn" class="warn hidden"></p>
+
+    <div class="card">
+        <div class="codebox">
+            <div>
+                <div class="muted">Code for the phone</div>
+                <div id="code">------</div>
+                <div class="muted">On the phone open <b id="phoneUrl">the https address printed by server.py</b></div>
+            </div>
+            <div class="row">
+                <button id="share">Share screen</button>
+                <button id="newCode" title="Anyone who knew the old code can't connect any more">New code</button>
+                <button id="kick" disabled>Disconnect headset</button>
+            </div>
+        </div>
+        <p id="status">Not sharing.</p>
+        <div id="stats"></div>
+        <video id="preview" class="hidden" muted autoplay playsinline></video>
+    </div>
+
+    <div class="card">
+        <h2>Quality</h2>
+        <div class="grid">
+            <label>Content
+                <select id="content">
+                    <option value="text">Desktop, text, code (sharp)</option>
+                    <option value="motion">Video, games (smooth)</option>
+                </select>
+            </label>
+            <label>Max resolution
+                <select id="res">
+                    <option value="0">Native</option>
+                    <option value="1440">1440p</option>
+                    <option value="1080" selected>1080p</option>
+                    <option value="720">720p</option>
+                </select>
+            </label>
+            <label>Frame rate
+                <select id="fps">
+                    <option value="30" selected>30 fps</option>
+                    <option value="60">60 fps</option>
+                    <option value="15">15 fps</option>
+                </select>
+            </label>
+            <label>Bitrate
+                <select id="bitrate">
+                    <option value="4">4 Mbps (weak Wi-Fi)</option>
+                    <option value="10" selected>10 Mbps</option>
+                    <option value="20">20 Mbps</option>
+                    <option value="40">40 Mbps</option>
+                </select>
+            </label>
+            <label>Codec (on the next connection)
+                <select id="codec">
+                    <option value="">Automatic</option>
+                    <option value="H264">H.264 (phones decode it in hardware)</option>
+                    <option value="VP9">VP9</option>
+                    <option value="VP8">VP8</option>
+                    <option value="AV1">AV1</option>
+                </select>
+            </label>
+            <label>Sound (on the next share)
+                <select id="audio">
+                    <option value="1">Share PC sound</option>
+                    <option value="0">No sound</option>
+                </select>
+            </label>
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>Mouse control from the headset</h2>
+        <label class="check"><input type="checkbox" id="control">
+            <span>Let the headset click and scroll on this PC (look + tap). Only works when sharing an entire screen.</span></label>
+        <div class="row" style="margin-top:10px">
+            <label class="muted">Screen <select id="monitor"></select></label>
+        </div>
+        <p id="controlStatus" class="muted"></p>
+    </div>
+
+    <div class="card">
+        <h2>How to</h2>
+        <ol class="muted">
+            <li>On the PC: <code>python server.py</code> in the vrdesktop folder.</li>
+            <li>Open this page as <code>http://localhost:8000/host.html</code> and press <b>Share screen</b>
+                (pick <b>Entire screen</b>; tick "Also share system audio" for sound).</li>
+            <li>On the phone (same Wi-Fi): open the https address shown above. The first time it warns that the
+                connection isn't private: tap Advanced, then Proceed. Type the code, press Enter VR.</li>
+            <li>Mouse control (optional): also run <code>python control.py</code> and tick the box above.</li>
+        </ol>
+        <p class="muted">The phone and this PC must be on the same Wi-Fi; nothing goes through the internet.</p>
+    </div>
+</main>
+
+<script type="module" src="./src/host.js"></script>
+</body>
+</html>

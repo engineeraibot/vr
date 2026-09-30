@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>VR Desktop</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <style>
+        :root { --bg: #0b0f17; --panel: #141b28; --line: #2a3650; --text: #e6ecf5; --muted: #93a3bd; --blue: #3b82f6; --green: #22c55e; }
+        * { box-sizing: border-box; }
+        body { margin: 0; overflow: hidden; background: var(--bg); color: var(--text); font-family: system-ui, -apple-system, 'Segoe UI', sans-serif; }
+        canvas { display: block; touch-action: none; }
+        .hidden { display: none !important; }
+
+        #hint {
+            position: fixed; left: 50%; bottom: 14px; transform: translateX(-50%); z-index: 20; pointer-events: none;
+            padding: 8px 14px; border-radius: 10px; background: rgba(10,14,22,0.75); color: var(--muted);
+            font-size: 12px; white-space: nowrap; max-width: calc(100% - 32px); overflow: hidden; text-overflow: ellipsis;
+        }
+
+        #title { position: fixed; inset: 0; z-index: 30; display: flex; padding: 16px; overflow-y: auto; background: rgba(5,8,14,0.72); }
+        .panel {
+            width: min(620px, 100%); margin: auto; padding: 24px 22px; border-radius: 16px;
+            background: var(--panel); border: 1px solid var(--line); box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+        }
+        h1 { margin: 0; font-size: 28px; letter-spacing: 0.5px; }
+        h1 span { color: var(--blue); }
+        .sub { margin: 6px 0 20px; color: var(--muted); font-size: 14px; line-height: 1.5; }
+        .code-row { display: flex; gap: 10px; }
+        #code {
+            flex: 1; min-width: 0; padding: 12px 14px; border-radius: 10px; border: 1px solid var(--line); background: #0d131e;
+            color: var(--text); font: 600 26px ui-monospace, 'Cascadia Mono', Consolas, monospace; letter-spacing: 6px; text-transform: uppercase;
+        }
+        #code:focus { outline: 2px solid var(--blue); }
+        #linkStatus { min-height: 1.4em; margin: 10px 0 18px; font-size: 13px; line-height: 1.5; color: var(--muted); white-space: pre-line; }
+        #linkStatus[data-state="connected"] { color: var(--green); }
+        #linkStatus[data-state="connected"]::before { content: '\25CF  '; }
+        .buttons { display: flex; gap: 12px; flex-wrap: wrap; }
+        button {
+            font: inherit; font-weight: 600; cursor: pointer; border: none; border-radius: 10px; color: #fff;
+            padding: 14px 20px; font-size: 16px; background: #26324a;
+        }
+        button:active { transform: translateY(1px); }
+        #enterVR { background: var(--blue); flex: 1; }
+        #flat { flex: 1; }
+        #connect { padding: 12px 18px; }
+        .box { margin-top: 18px; padding: 14px; border-radius: 10px; background: rgba(0,0,0,0.25); border: 1px solid var(--line); }
+        .box p, .box li { font-size: 13px; line-height: 1.6; margin: 4px 0; color: #c6d1e3; }
+        .settings { display: flex; flex-wrap: wrap; gap: 12px 22px; font-size: 13px; align-items: center; }
+        select { font: inherit; font-size: 13px; padding: 4px; }
+        details summary { cursor: pointer; font-weight: 600; }
+        details ul { padding-left: 18px; }
+        code { background: #0d131e; padding: 1px 5px; border-radius: 4px; }
+    </style>
+</head>
+<body>
+
+<div id="hint" class="hidden">Drag / arrows: look &middot; Click: tap &middot; Wheel: closer / further &middot; +/-: size &middot; F: curved &middot; M: mouse &middot; Esc: menu</div>
+
+<div id="title">
+    <div class="panel">
+        <h1>VR <span>Desktop</span></h1>
+        <p class="sub">Your PC's screen on a giant virtual monitor, for a phone in a Cardboard headset.</p>
+
+        <div class="code-row">
+            <input id="code" placeholder="CODE" maxlength="16" autocomplete="off" autocapitalize="characters" spellcheck="false">
+            <button id="connect">Connect</button>
+        </div>
+        <p id="linkStatus"></p>
+
+        <div class="buttons">
+            <button id="enterVR">Enter VR</button>
+            <button id="flat">View on screen</button>
+        </div>
+
+        <div class="box">
+            <div class="settings">
+                <label>Headset lenses
+                    <select id="viewer">
+                        <option value="v2">Cardboard v2 (most headsets)</option>
+                        <option value="v1">Cardboard v1</option>
+                        <option value="none">No correction</option>
+                    </select>
+                </label>
+                <label><input type="checkbox" id="sound" checked> PC sound on the phone</label>
+            </div>
+        </div>
+
+        <div class="box">
+            <details>
+                <summary>How to use</summary>
+                <ul>
+                    <li>On the PC open <code>http://localhost:8000/host.html</code>, press <b>Share screen</b> and type its code here</li>
+                    <li>Enter VR and put the phone sideways into the headset. Look at the screen: that's where it stays</li>
+                    <li>Look down for the buttons: recenter, size, distance, curved / flat, mouse, sound. Look at one and tap</li>
+                    <li>Double tap = recenter (with Mouse ON: double tap while looking away from the screen)</li>
+                    <li>Mouse ON (if the PC allows it): look + tap = click, tap twice = double click, hold still = right click,
+                        hold and tilt your head up / down = scroll</li>
+                    <li>Or just use the PC's own mouse and keyboard: the pointer shows on the virtual screen</li>
+                    <li>Leave VR with the phone's back gesture</li>
+                </ul>
+            </details>
+        </div>
+    </div>
+</div>
+
+<script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.160/build/three.module.js",
+      "three/examples/jsm/": "https://cdn.jsdelivr.net/npm/three@0.160/examples/jsm/"
+    }
+  }
+</script>
+<script type="module" src="./src/main.js"></script>
+
+</body>
+</html>
