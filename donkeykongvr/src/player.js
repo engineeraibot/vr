@@ -11,7 +11,7 @@ export class Player {
         this.blob = new THREE.Mesh(GEO.blob, MAT.shadow);
         this.blob.renderOrder = 2;
         game.world.add(this.blob);
-        this.reset(0, 0, 0);
+        this.reset(0, 0.5, 0);
     }
 
     get h() { return this.crouching ? 0.9 : 1.7; }
@@ -35,6 +35,12 @@ export class Player {
     step(dt, inp) {
         if (this.hammerTimer > 0) this.hammerTimer -= dt;
 
+        // Fall check
+        if (this.y < -5) {
+            this.hurt();
+            return;
+        }
+
         // Check barrel cannon targeting & launching
         this.checkCannonLaunch(inp);
 
@@ -50,6 +56,8 @@ export class Player {
         const rx = -fz, rz = fx;
         let wx = fx * inp.moveF + rx * inp.moveS;
         let wz = fz * inp.moveF + rz * inp.moveS;
+        let wl = Math.hypot(wx, wz);
+        if (wl > 1) { wx /= wl; wz /= wl; }
 
         this.crouching = inp.crouch;
         if (this.crouching) { wx = wz = 0; }
