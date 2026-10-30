@@ -72,12 +72,14 @@ class Game {
             this.renderer.setSize(window.innerWidth, window.innerHeight);
         });
 
-        document.getElementById('enterVR')?.addEventListener('click', async () => {
-            this.sound.unlock();
-            await this.motion.enable();
-            await this.phoneHead.enable();
-            this.stereoView.active = true;
-            this.startGame();
+        document.addEventListener('fullscreenchange', () => {
+            if (!document.fullscreenElement && this.stereoView.active) {
+                this.exitVR();
+            }
+        });
+
+        document.getElementById('enterVR')?.addEventListener('click', () => {
+            this.enterVR();
         });
 
         document.getElementById('play')?.addEventListener('click', () => {
@@ -85,6 +87,23 @@ class Game {
             this.stereoView.active = false;
             this.startGame();
         });
+    }
+
+    enterVR() {
+        this.sound.unlock();
+        this.motion.enable();
+        this.phoneHead.enable();
+        const el = document.documentElement;
+        const fs = el.requestFullscreen ? el.requestFullscreen({ navigationUI: 'hide' }) : null;
+        Promise.resolve(fs).catch(() => {}).then(() => {
+            if (screen.orientation && screen.orientation.lock) screen.orientation.lock('landscape').catch(() => {});
+        });
+        this.stereoView.active = true;
+        this.startGame();
+    }
+
+    exitVR() {
+        this.stereoView.active = false;
     }
 
     spawnHammer() {
