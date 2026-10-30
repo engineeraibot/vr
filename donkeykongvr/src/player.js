@@ -46,6 +46,7 @@ export class Player {
         if (this.climbing) return;
 
         // Normal locomotion & hopping
+        // Forward is where you look (inp.fwdX, inp.fwdZ), right is perpendicular to it (-fz, fx)
         const fx = inp.fwdX, fz = inp.fwdZ;
         const rx = -fz, rz = fx;
         let wx = fx * inp.moveF + rx * inp.moveS;
@@ -94,7 +95,7 @@ export class Player {
         if (nearLadder && (inp.climbUp || inp.climbDown)) {
             this.climbing = true;
             this.vy = 0;
-            const climbSpeed = 3.5 * Math.max(1, inp.moveF);
+            const climbSpeed = 3.5 * Math.max(1, Math.abs(inp.moveF));
             if (inp.climbUp) {
                 this.y += climbSpeed * dt;
                 this.game.sound.play('climb');
@@ -109,8 +110,7 @@ export class Player {
 
     checkCannonLaunch(inp) {
         let targetCannon = null;
-        const camDir = new THREE.Vector3();
-        this.game.camera.getWorldDirection(camDir);
+        const camDir = this.game.gaze || new THREE.Vector3(0, 0, -1);
         const camPos = new THREE.Vector3(this.x, this.y + this.eye, this.z);
 
         for (const c of this.game.stage.cannons) {
