@@ -1,83 +1,195 @@
 import * as THREE from 'three';
 
+const GAME_KEYS = new Set([
+    'Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight',
+    'KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyQ', 'KeyE', 'KeyC', 'KeyP', 'KeyM', 'KeyR',
+    'ControlLeft', 'ControlRight'
+]);
+const TAP_TIME = 0.25;
+const HOLD_TIME = 0.3;
+const MOUSE_SENS = 0.0025;
+
+const dz = v => (Math.abs(v) < 0.15 ? 0 : (v - Math.sign(v) * 0.15) / 0.85);
+const pressed = (gp, i) => !!(gp.buttons[i] && gp.buttons[i].pressed);
+
 export class Input {
-    constructor(game) {
-        this.game = game;
-        this.keys = {};
-        this.moveF = 0;
-        this.moveS = 0;
-        this.fwdX = 0;
-        this.fwdZ = -1;
-        this.jumpP = false;
-        this.jump = false;
-        this.crouch = false;
-        this.climbUp = false;
-        this.climbDown = false;
-        this.yaw = 0;
-        this.pitch = 0;
-        this.mouseCaptured = false;
-        this.touching = false;
-        this.touchFwd = false;
+    constructor(canvas, motion) {
+        this.canvas = canvas;
+        this.motion = motion;
+        this.keys = new Set();
+        this.prev = {};
+        this.lookDX = 0;
+        this.lookDY = 0;
+        this.mouseDown = false;
+        this.mouseClick = false;
+        this.locked = false;
+        this.touches = new Map();
+        this.tapQueued = false;
+        this.select = { down: false, t0: 0 };
+        this.jumpHoldUntil = 0;
+        this.snapHeld = false;
+        this.lastTouchTime = 0;
 
         window.addEventListener('keydown', e => {
-            if (e.code === 'KeyP') this.game.togglePause();
-            if (e.code === 'KeyM') this.game.toggleMute();
-            if (e.code === 'KeyR') this.game.recenterVR();
-            this.keys[e.code] = true;
+            const tag = e.target && e.target.tagName;
+            if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return;
+            if (GAME_KEYS.has(e.code)) e.preventDefault();
+            this.keys.add(e.code);
         });
+        window.addEventListener('keyup', e => this.keys.delete(e.code));
+        window.addEventListener('blur', () => { this.keys.clear(); this.mouseDown = false; });
 
-        window.addEventListener('keyup', e => {
-            this.keys[e.code] = false;
+        document.addEventListener('pointerlockchange', () => {
+            this.locked = document.pointerLockElement === canvas;
         });
-
-        window.addEventListener('mousedown', () => {
-            if (!this.game.xrSession && !this.game.phoneHead.listening) {
-                document.body.requestPointerLock?.();
-            }
+        canvas.addEventListener('mousedown', e => {
+            if (this.locked) { this.mouseClick = true; return; }
+            if (e.button === 0 || e.button === 2) this.mouseDown = true;
         });
-
+        window.addEventListener('mouseup', () => { this.mouseDown = false; });
         window.addEventListener('mousemove', e => {
-            if (document.pointerLockElement === document.body) {
-                this.yaw -= e.movementX * 0.0022;
-                this.pitch = THREE.MathUtils.clamp(this.pitch - e.movementY * 0.0022, -Math.PI / 2.2, Math.PI / 2.2);
+            if (this.locked || this.mouseDown) {
+                this.lookDX += e.movementX * MOUSE_SENS;
+                this.lookDY += e.movementY * MOUSE_SENS;
             }
         });
+        canvas.addEventListener('contextmenu', e => e.preventDefault());
 
-        window.addEventListener('touchstart', () => {
-            this.touching = true;
-            this.touchFwd = true;
-        });
-        window.addEventListener('touchend', () => {
-            this.touching = false;
-            this.touchFwd = false;
-        });
+        const opts = { passive: false };
+        canvas.addEventListener('touchstart', e => {
+            e.preventDefault();
+            const now = performance.now() / 1000;
+            this.lastTouchTime = now;
+            for (const t of e.changedTouches) this.touches.set(t.identifier, { x: t.clientX, y: t.clientY, t0: now, moved: false });
+        }, opts);
+        canvas.addEventListener('touchmove', e => {
+            e.preventDefault();
+            for (const t of e.changedTouches) {
+                const s = this.touches.get(t.identifier);
+                if (!s) continue;
+                const dx = t.clientX - s.x, dy = t.clientY - s.y;
+                if (Math.hypot(dx, dy) > 3) s.moved = true;
+                if (s.moved) {
+                    this.lookDX -= dx * 0.006;
+                    this.lookDY -= dy * 0.006;
+                }
+                s.x = t.clientX;
+                s.y = t.clientY;
+            }
+        }, opts);
+        const end = e => {
+            const now = performance.now() / 1000;
+            for (const t of e.changedTouches) {
+                const s = this.touches.get(t.identifier);
+                if (s && !s.moved && now - s.t0 < TAP_TIME) this.tapQueued = true;
+                this.touches.delete(t.identifier);
+            }
+        };
+        canvas.addEventListener('touchend', end);
+        canvas.addEventListener('touchcancel', end);
     }
 
-    update(dt) {
-        // Keyboard inputs
-        const k = this.keys;
-        let kF = (k['KeyW'] || k['ArrowUp'] ? 1 : 0) - (k['KeyS'] || k['ArrowDown'] ? 1 : 0);
-        let kS = (k['KeyD'] || k['ArrowRight'] ? 1 : 0) - (k['KeyA'] || k['ArrowLeft'] ? 1 : 0);
+    selectStart() {
+        this.select.down = true;
+        this.select.t0 = performance.now() / 1000;
+    }
 
-        if (this.touchFwd) kF = 1;
+    selectEnd() {
+        const now = performance.now() / 1000;
+        if (this.select.down && now - this.select.t0 < TAP_TIME) this.tapQueued = true;
+        this.select.down = false;
+    }
 
-        // Motion step amount
-        const motionAmt = this.game.motion.amount;
+    poll(dt, session, now, lookPitch = 0) {
+        const k = c => this.keys.has(c);
+        let moveF = (k('KeyW') || k('ArrowUp') ? 1 : 0) - (k('KeyS') || k('ArrowDown') ? 1 : 0);
+        let moveS = (k('KeyD') ? 1 : 0) - (k('KeyA') ? 1 : 0);
+        let turn = (k('ArrowRight') || k('KeyE') ? 1 : 0) - (k('ArrowLeft') || k('KeyQ') ? 1 : 0);
+        let jump = k('Space');
+        let crouch = k('KeyC') || k('ControlLeft') || k('ControlRight');
+        let pause = k('KeyP') || k('Escape');
+        let mute = k('KeyM');
+        let recenter = k('KeyR');
+        let lookX = this.lookDX, lookY = this.lookDY;
+        this.lookDX = this.lookDY = 0;
+        this.mouseClick = false;
+        let tap = false;
+        let snapRaw = 0;
 
-        this.moveF = Math.max(kF, motionAmt);
-        this.moveS = kS;
+        for (const s of this.touches.values()) if (!s.moved && now - s.t0 > HOLD_TIME) moveF = Math.max(moveF, 1);
+        if (this.select.down && now - this.select.t0 > HOLD_TIME) moveF = Math.max(moveF, 1);
+        if (this.tapQueued) { tap = true; this.tapQueued = false; }
 
-        this.jump = k['Space'] || this.touching || this.game.motion.jumpQueued;
-        this.jumpP = k['Space'] || this.game.motion.takeJump();
+        const pads = navigator.getGamepads ? navigator.getGamepads() : [];
+        for (const gp of pads) {
+            if (!gp || !gp.connected || gp.mapping !== 'standard') continue;
+            moveS += dz(gp.axes[0] || 0);
+            moveF -= dz(gp.axes[1] || 0);
+            lookX += dz(gp.axes[2] || 0) * 2.6 * dt;
+            lookY += dz(gp.axes[3] || 0) * 2.0 * dt;
+            if (pressed(gp, 0)) jump = true;
+            if (pressed(gp, 1) || pressed(gp, 2)) crouch = true;
+            if (pressed(gp, 9)) pause = true;
+            if (pressed(gp, 12)) moveF = Math.max(moveF, 1);
+            if (pressed(gp, 13)) moveF = Math.min(moveF, -1);
+            if (pressed(gp, 14)) turn -= 1;
+            if (pressed(gp, 15)) turn += 1;
+        }
 
-        this.crouch = k['KeyC'] || k['ControlLeft'] || this.game.motion.isCrouching;
+        if (session) {
+            for (const src of session.inputSources) {
+                const gp = src.gamepad;
+                if (!gp || gp.axes.length < 2) continue;
+                const ax = gp.axes.length >= 4 ? gp.axes[2] : gp.axes[0];
+                const ay = gp.axes.length >= 4 ? gp.axes[3] : gp.axes[1];
+                if (src.handedness === 'right') {
+                    snapRaw = ax;
+                } else {
+                    moveS += dz(ax);
+                    moveF -= dz(ay);
+                }
+                if (pressed(gp, 4) || pressed(gp, 0)) jump = true;
+                if (pressed(gp, 3) || pressed(gp, 1)) crouch = true;
+            }
+        }
 
-        // Pitch look angle for climbing (looking up at ladders)
-        this.climbUp = k['KeyW'] || k['ArrowUp'] || (this.pitch > 0.25) || (this.game.headPitch > 0.25);
-        this.climbDown = k['KeyS'] || k['ArrowDown'] || (this.pitch < -0.3) || (this.game.headPitch < -0.3);
+        if (this.motion) {
+            const amt = this.motion.amount;
+            if (amt > 0) moveF = Math.max(moveF, Math.min(1, amt));
+            if (this.motion.takeJump()) tap = true;
+            if (this.motion.isCrouching) crouch = true;
+        }
 
-        // Update forward vector from yaw
-        this.fwdX = -Math.sin(this.yaw);
-        this.fwdZ = -Math.cos(this.yaw);
+        if (tap) this.jumpHoldUntil = now + 0.5;
+        if (now < this.jumpHoldUntil) jump = true;
+
+        let snap = 0;
+        if (Math.abs(snapRaw) > 0.7 && !this.snapHeld) { snap = Math.sign(snapRaw); this.snapHeld = true; }
+        if (Math.abs(snapRaw) < 0.3) this.snapHeld = false;
+
+        const climbUp = k('KeyW') || k('ArrowUp') || (lookPitch > 0.25) || (moveF > 0 && lookPitch > 0.15);
+        const climbDown = k('KeyS') || k('ArrowDown') || (lookPitch < -0.3);
+
+        const p = this.prev;
+        const state = {
+            moveF: Math.max(-1, Math.min(1, moveF)),
+            moveS: Math.max(-1, Math.min(1, moveS)),
+            turn,
+            lookX,
+            lookY,
+            snap,
+            jump,
+            jumpP: (jump && !p.jump) || tap,
+            crouch,
+            climbUp,
+            climbDown,
+            pauseP: pause && !p.pause,
+            muteP: mute && !p.mute,
+            recenterP: recenter && !p.recenter,
+            fwdX: 0,
+            fwdZ: -1
+        };
+        this.prev = { jump, pause, mute, recenter };
+        return state;
     }
 }
